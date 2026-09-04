@@ -109,6 +109,13 @@ main{max-width:1060px;margin:0 auto;padding:28px 20px 96px}
 .sync.warn{background:#FFF8EC;border-color:#F5DDB0;color:#92400E}
 .sync.run{background:#F5F7FF;border-color:var(--brand-line);color:var(--brand)}
 .sync .chip{display:inline-block;margin:2px 3px 0 0;padding:1px 7px;border-radius:6px;background:rgba(0,0,0,.06);font-variant-numeric:tabular-nums}
+.speed{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.speed .opt{display:grid;gap:2px;text-align:left;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer;font:inherit;color:inherit}
+.speed .opt:hover{border-color:var(--brand-line)}
+.speed .opt.on{border-color:var(--brand);background:var(--brand-soft);box-shadow:0 0 0 1px var(--brand) inset}
+.speed .opt b{font-size:14.5px}
+.speed .opt .p{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums}
+.speed .opt .t{font-size:12.5px;color:var(--ink-3)}
 
 /* ── 영역 미리보기 · 검수 ─────────────────────────────────────────────── */
 .pages{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-top:4px}
@@ -314,6 +321,16 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
           <span class="tiny" id="q-note"></span>
         </div>
         <div class="sync" id="sync" hidden></div>
+        <div class="speed" id="speed-pick">
+          <button type="button" class="opt on" data-speed="fast">
+            <b>빠르게</b><span class="p" id="sp-fast">-</span>
+            <span class="t">문항당 약 13초</span>
+          </button>
+          <button type="button" class="opt" data-speed="cheap">
+            <b>저렴하게</b><span class="p" id="sp-cheap">-</span>
+            <span class="t">문항당 약 43초 · 판독 품질은 같습니다</span>
+          </button>
+        </div>
         <div class="grid3">
           <div class="field"><label for="cf-title">문서 제목</label><input class="inp" id="cf-title" placeholder="예: 마플시너지 공통수학2"></div>
           <div class="field"><label>단 수</label><div class="seg" data-key="columns" role="group" aria-label="단 수"><button type="button" data-v="1" aria-pressed="false">1단</button><button type="button" data-v="2" aria-pressed="true">2단</button></div></div>
@@ -492,7 +509,7 @@ let API = (localStorage.getItem('ocr30_api') || location.origin).replace(/\/$/, 
 
 const S = { sb: null, session: null, wallet: null, service: false, worker: false, sid: null, files: {}, boxes: 0,
             state: null, regions: null, regionsBackup: null, result: null, audit: null, reviewAll: false,
-            format: { columns: 2, itemsPerColumn: 2 }, poll: null, tick: null, t0: 0, syncPoll: null };
+            format: { columns: 2, itemsPerColumn: 2 }, speed: 'fast', poll: null, tick: null, t0: 0, syncPoll: null };
 
 let toastT;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 3600); }
@@ -680,16 +697,27 @@ function priceKind() {
   return matched ? 'matched' : 'generated';
 }
 
+/* 네 단가: 해설(첨부/생성) × 속도(빠르게/저렴하게) */
+function unitPrice(speed) {
+  const w = S.wallet || {};
+  const matched = priceKind() === 'matched';
+  if (speed === 'cheap')
+    return (matched ? w.priceFlex : w.priceGeneratedFlex) ?? (matched ? w.pricePerProblem : w.priceGenerated) ?? 0;
+  return (matched ? w.pricePerProblem : w.priceGenerated) ?? 0;
+}
+
 function quote() {
-  const cheap = S.wallet?.pricePerProblem || 0;
-  const dear = S.wallet?.priceGenerated || cheap;
-  const price = priceKind() === 'matched' ? cheap : dear;
+  const price = unitPrice(S.speed);
   const cost = S.boxes * price;
+  $('#sp-fast').textContent = S.service ? num(S.boxes * unitPrice('fast')) + ' 캐시' : '-';
+  $('#sp-cheap').textContent = S.service ? num(S.boxes * unitPrice('cheap')) + ' 캐시' : '-';
+  $('#speed-pick').hidden = !S.service;
   $('#q-count').textContent = num(S.boxes);
   $('#q-cost').textContent = num(cost);
   $('#q-price').textContent = num(price);
   $('#q-kind').textContent = !S.service ? ''
-    : priceKind() === 'matched' ? '해설 첨부 단가' : '해설 생성 단가';
+    : (priceKind() === 'matched' ? '해설 첨부' : '해설 생성')
+      + (S.speed === 'cheap' ? '·저렴하게' : '·빠르게');
   const after = (S.wallet?.available || 0) - cost;
   $('#q-after').textContent = num(after);
   $('#q-after').style.color = after < 0 ? 'var(--bad)' : '';
@@ -745,6 +773,12 @@ async function loadSolutionIndex() {
   }, 1500);
 }
 
+$$('#speed-pick .opt').forEach(btn => btn.addEventListener('click', () => {
+  S.speed = btn.dataset.speed;
+  $$('#speed-pick .opt').forEach(x => x.classList.toggle('on', x === btn));
+  quote();
+}));
+
 $$('.seg[data-key]').forEach(seg => seg.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   $$('button', seg).forEach(x => x.setAttribute('aria-pressed', String(x === b)));
@@ -790,7 +824,8 @@ $('#btn-run').addEventListener('click', async () => {
                   apiKey: S.service ? '' : $('#cf-key').value.trim(), maxWorkers: 4,
                   columns: S.format.columns, itemsPerColumn: S.format.itemsPerColumn,
                   textFont: '나눔고딕', textSize: 10, equationFont: 'HYhwpEQ', equationSize: 11,
-                  noteMode: 'endnote', generateMissingSolutions: true, regionMode: 'problem_boxes' };
+                  noteMode: 'endnote', generateMissingSolutions: true, regionMode: 'problem_boxes',
+                  speed: S.speed };
     if (!S.service && !cfg.apiKey) { toast('API 키를 입력해주세요.'); return; }
     // 사람이 손본 영역을 먼저 저장한다 — 예약 금액은 이 상자 수로 계산된다
     if (S.regions) {
