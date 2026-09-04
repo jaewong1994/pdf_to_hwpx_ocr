@@ -1,0 +1,9 @@
+# 비밀키는 절대 올리지 않는다
+.env
+.env.*
+*.key
+적재설정.json
+runtime/
+node_modules/
+.DS_Store
+Thumbs.db
