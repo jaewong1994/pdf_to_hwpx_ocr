@@ -112,6 +112,7 @@ main{max-width:1060px;margin:0 auto;padding:28px 20px 96px}
 .pg .cap{display:flex;align-items:center;gap:6px;padding:7px 9px;font-size:12.5px;color:var(--ink-2);border-top:1px solid var(--line-2)}
 .pg .cap b{font-weight:700;color:var(--ink)}
 .pg .cap .sp{flex:1}
+.pg .cap .fig{color:#7C3AED;font-weight:600}
 .pg .cv .zoom{position:absolute;right:6px;bottom:6px;opacity:0;transition:opacity .12s}
 .pg:hover .cv .zoom{opacity:1}
 .edit{display:grid;gap:12px}
@@ -817,7 +818,7 @@ async function renderPreview() {
     cell.className = 'pg';
     cell.innerHTML = `<div class="cv"><canvas></canvas>
         <button class="btn sm zoom" type="button">다듬기</button></div>
-      <div class="cap"><b>${esc(key.split(':')[1])}쪽</b><span class="sp"></span><span class="n">${boxes.length}문항</span></div>`;
+      <div class="cap"><b>${esc(key.split(':')[1])}쪽</b><span class="sp"></span><span class="n">${boxes.length}문항</span>${figCount(boxes) ? `<span class="fig">그림 ${figCount(boxes)}</span>` : ''}</div>`;
     wrap.appendChild(cell);
     const canvas = $('canvas', cell);
     const im = await pageImage(key);
@@ -830,6 +831,12 @@ async function renderPreview() {
       g.strokeStyle = b.number ? '#1D4ED8' : '#B45309';
       g.lineWidth = 3;
       g.strokeRect(b.x * W, b.y * H, b.w * W, b.h * H);
+      (b.figure_boxes || []).forEach(f => {          // 이 문항에 딸린 그림
+        g.strokeStyle = '#7C3AED'; g.lineWidth = 2;
+        g.setLineDash([5, 4]);
+        g.strokeRect(f.x * W, f.y * H, f.w * W, f.h * H);
+        g.setLineDash([]);
+      });
       g.fillStyle = b.number ? 'rgba(29,78,216,.9)' : 'rgba(180,83,9,.9)';
       g.fillRect(b.x * W, b.y * H, 34, 18);
       g.fillStyle = '#fff'; g.font = '600 12px sans-serif';
@@ -843,6 +850,8 @@ async function renderPreview() {
     });
   }
 }
+
+function figCount(boxes) { return (boxes || []).reduce((n, b) => n + ((b.figure_boxes || []).length), 0); }
 
 function recount() {
   S.boxes = Object.entries(S.regions?.pages || {})
@@ -860,7 +869,7 @@ $('#btn-restore').addEventListener('click', () => {
 /* ── 영역 다듬기(과금 전, 사람이 직접) ──────────────────────────────────
    빈 곳을 끌면 새 상자, 상자 안을 끌면 이동, 모서리를 끌면 크기 조절.
    화면 좌표는 캔버스 픽셀, 저장 좌표는 쪽 대비 0~1 비율이다. */
-const ED = { key: null, sel: -1, page: null, W: 0, H: 0, drag: null, backup: null };
+const ED = { key: null, sel: -1, figSel: null, page: null, W: 0, H: 0, drag: null, backup: null };
 const HANDLE = 9;                 // 모서리 손잡이 반경(캔버스 픽셀)
 const MIN_SIDE = 0.012;           // 상자 최소 변 길이(쪽 대비)
 
@@ -873,6 +882,19 @@ function edPaint() {
   edBoxes().forEach((b, i) => {
     const x = b.x * ED.W, y = b.y * ED.H, w = b.w * ED.W, h = b.h * ED.H;
     const on = i === ED.sel;
+    (b.figure_boxes || []).forEach((f, k) => {          // 이 문항에 딸린 그림
+      const fx = f.x * ED.W, fy = f.y * ED.H, fw = f.w * ED.W, fh = f.h * ED.H;
+      const pick = ED.figSel && ED.figSel[0] === i && ED.figSel[1] === k;
+      g.save();
+      g.strokeStyle = '#7C3AED'; g.lineWidth = pick ? 3 : 2;
+      if (!pick) g.setLineDash([6, 4]);
+      g.strokeRect(fx, fy, fw, fh);
+      if (pick) { g.fillStyle = 'rgba(124,58,237,.12)'; g.fillRect(fx, fy, fw, fh); }
+      g.fillStyle = '#7C3AED'; g.fillRect(fx, fy, 58, 17);
+      g.fillStyle = '#fff'; g.font = '600 11px sans-serif';
+      g.fillText(`그림 ${f.index || k + 1}`, fx + 5, fy + 13);
+      g.restore();
+    });
     g.strokeStyle = on ? '#0F766E' : (b.number ? '#1D4ED8' : '#B45309');
     g.lineWidth = on ? 3 : 2;
     g.strokeRect(x, y, w, h);
@@ -888,11 +910,28 @@ function edPaint() {
     g.fillText(String(b.number || '?'), x + 6, y + 15);
   });
   const b = edBoxes()[ED.sel];
-  $('#ed-sel').textContent = b ? `${b.number ? b.number + '번' : '번호 없는'} 상자` : '상자를 고르세요';
-  $('#ed-sel').className = b ? 'sel' : '';
-  $('#ed-num').disabled = !b; $('#ed-del').disabled = !b;
-  $('#ed-num').value = b?.number ?? '';
-  $('#ed-count').textContent = `이 쪽 ${edBoxes().length}문항`;
+  const fsel = ED.figSel ? (edBoxes()[ED.figSel[0]]?.figure_boxes || [])[ED.figSel[1]] : null;
+  $('#ed-sel').textContent = fsel ? fsel.label
+                                  : (b ? `${b.number ? b.number + '번' : '번호 없는'} 상자` : '상자를 고르세요');
+  $('#ed-sel').className = (fsel || b) ? 'sel' : '';
+  $('#ed-num').disabled = !b || !!fsel; $('#ed-del').disabled = !b && !fsel;
+  $('#ed-num').value = fsel ? '' : (b?.number ?? '');
+  const figs = figCount(edBoxes());
+  $('#ed-count').textContent = `이 쪽 ${edBoxes().length}문항` + (figs ? ` · 그림 ${figs}` : '');
+}
+
+/** 누른 자리에 그림 상자가 있으면 [문항 index, 그림 index]. 문항 상자보다 먼저 잡는다. */
+function edFigureAt(p) {
+  const boxes = edBoxes();
+  for (let i = boxes.length - 1; i >= 0; i--) {
+    const figs = boxes[i].figure_boxes || [];
+    for (let k = figs.length - 1; k >= 0; k--) {
+      const f = figs[k];
+      if (p.x >= f.x * ED.W && p.x <= (f.x + f.w) * ED.W && p.y >= f.y * ED.H && p.y <= (f.y + f.h) * ED.H)
+        return [i, k];
+    }
+  }
+  return null;
 }
 
 function edPoint(ev) {
@@ -949,7 +988,15 @@ function box_dirty() { edPaint(); recount(); }
 
 $('#ed-stage').addEventListener('pointerdown', ev => {
   if (!ED.key) return;
-  const p = edPoint(ev), hit = edHit(p);
+  const p = edPoint(ev), fig = edFigureAt(p);
+  if (fig) {                                   // 그림 상자를 골랐다 — 문항 상자는 건드리지 않는다
+    ED.figSel = fig;
+    ED.drag = null;
+    edPaint();
+    return;
+  }
+  ED.figSel = null;
+  const hit = edHit(p);
   if (hit.mode === 'draw') {
     edBoxes().push({ id: `${ED.key}-h${Date.now().toString(36)}`, x: p.x / ED.W, y: p.y / ED.H,
                      w: MIN_SIDE, h: MIN_SIDE, number: null, source: 'hand' });
@@ -978,6 +1025,16 @@ $('#ed-num').addEventListener('input', () => {
   edPaint();
 });
 $('#ed-del').addEventListener('click', () => {
+  if (ED.figSel) {                              // 그림만 지운다 — 문항은 남는다
+    const owner = edBoxes()[ED.figSel[0]];
+    (owner.figure_boxes || []).splice(ED.figSel[1], 1);
+    (owner.figure_boxes || []).forEach((f, k) => {
+      f.index = k + 1;
+      f.label = owner.number ? `${owner.number}번 그림 ${k + 1}` : `그림 ${k + 1}`;
+    });
+    owner.figures = (owner.figure_boxes || []).length;
+    ED.figSel = null; box_dirty(); return;
+  }
   if (ED.sel < 0) return;
   edBoxes().splice(ED.sel, 1); ED.sel = -1; box_dirty();
 });
@@ -1012,7 +1069,7 @@ document.addEventListener('keydown', ev => {
 });
 
 async function openEditor(key, index) {
-  ED.key = key; ED.sel = index; ED.drag = null;
+  ED.key = key; ED.sel = index; ED.figSel = null; ED.drag = null;
   ED.backup = JSON.parse(JSON.stringify(S.regions?.pages?.[key] || []));
   $('#ed-title').textContent = `${key.split(':')[1]}쪽 영역 다듬기`;
   const keys = edPageKeys(), at = keys.indexOf(key);
