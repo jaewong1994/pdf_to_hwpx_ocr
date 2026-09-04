@@ -112,6 +112,14 @@ main{max-width:1060px;margin:0 auto;padding:28px 20px 96px}
 .pg .cap{display:flex;align-items:center;gap:6px;padding:7px 9px;font-size:12.5px;color:var(--ink-2);border-top:1px solid var(--line-2)}
 .pg .cap b{font-weight:700;color:var(--ink)}
 .pg .cap .sp{flex:1}
+.pg .cv .zoom{position:absolute;right:6px;bottom:6px;opacity:0;transition:opacity .12s}
+.pg:hover .cv .zoom{opacity:1}
+.edit{display:grid;gap:12px}
+.edit .stage{position:relative;line-height:0;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden;touch-action:none;cursor:crosshair}
+.edit .stage canvas{width:100%;height:auto;display:block}
+.edit .bar{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:13px;color:var(--ink-2);background:#fff;padding:8px 0}
+.edit .bar .inp{width:96px}
+.edit .sel{font-weight:700;color:var(--ink)}
 .hintbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 13px;border-radius:10px;background:#F7F9FC;border:1px solid var(--line-2);font-size:13px;color:var(--ink-2)}
 .rev{display:grid;gap:10px;max-height:620px;overflow:auto;padding-right:4px}
 .rv{display:grid;grid-template-columns:150px 1fr;gap:12px;border:1px solid var(--line);border-radius:10px;padding:11px;background:#fff}
@@ -305,7 +313,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
         <div id="preview-wrap" hidden>
           <div class="hintbar">
             <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
-            <span>잘못 잡힌 상자를 눌러 지우면 그만큼 캐시도 줄어듭니다. <b>여기까지는 과금되지 않습니다.</b></span>
+            <span>쪽을 눌러 상자를 옮기거나 지우거나 새로 그릴 수 있습니다. 지운 만큼 캐시도 줄어듭니다. <b>여기까지는 과금되지 않습니다.</b></span>
             <span class="sp" style="flex:1"></span>
             <button class="btn sm" id="btn-restore">되돌리기</button>
           </div>
@@ -421,6 +429,28 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       <p class="tiny" style="margin:0">판독과 한글 조판은 운영자 PC에서 돕니다. 그 PC의 주소(터널 주소)를 넣어 주세요. 브라우저에 저장됩니다.</p>
       <div class="field"><label for="srv-input">주소</label><input class="inp" id="srv-input" placeholder="https://example.trycloudflare.com"></div>
       <div class="row"><button class="btn primary" id="srv-save">저장하고 확인</button><span class="tiny" id="srv-state"></span></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="m-edit">
+  <div class="box" style="width:min(900px,100%)">
+    <div class="hd"><h2 id="ed-title">영역 다듬기</h2><div class="spacer" style="flex:1"></div><button class="btn sm ghost" data-close>닫기</button></div>
+    <div class="bd">
+      <p class="tiny" style="margin:0">빈 곳을 끌면 상자가 새로 생기고, 상자 안을 끌면 옮겨지고, 모서리를 끌면 크기가 바뀝니다. 여기까지는 과금되지 않습니다.</p>
+      <div class="edit">
+        <div class="bar">
+          <span id="ed-sel">상자를 고르세요</span>
+          <label for="ed-num" class="tiny">번호</label>
+          <input class="inp" id="ed-num" inputmode="numeric" placeholder="예: 533" disabled>
+          <button class="btn sm" id="ed-del" disabled>이 상자 지우기</button>
+          <span class="spacer" style="flex:1"></span>
+          <span class="tiny" id="ed-count"></span>
+          <button class="btn sm" id="ed-reset">이 쪽만 되돌리기</button>
+          <button class="btn primary sm" id="ed-done">다 됐어요</button>
+        </div>
+        <div class="stage" id="ed-stage"><canvas id="ed-canvas"></canvas></div>
+      </div>
     </div>
   </div>
 </div>
@@ -782,7 +812,8 @@ async function renderPreview() {
     const boxes = S.regions.pages[key] || [];
     const cell = document.createElement('div');
     cell.className = 'pg';
-    cell.innerHTML = `<div class="cv"><canvas></canvas></div>
+    cell.innerHTML = `<div class="cv"><canvas></canvas>
+        <button class="btn sm zoom" type="button">다듬기</button></div>
       <div class="cap"><b>${esc(key.split(':')[1])}쪽</b><span class="sp"></span><span class="n">${boxes.length}문항</span></div>`;
     wrap.appendChild(cell);
     const canvas = $('canvas', cell);
@@ -805,11 +836,7 @@ async function renderPreview() {
       const r = canvas.getBoundingClientRect();
       const rx = (ev.clientX - r.left) / r.width, ry = (ev.clientY - r.top) / r.height;
       const hit = (S.regions.pages[key] || []).findIndex(b => rx >= b.x && rx <= b.x + b.w && ry >= b.y && ry <= b.y + b.h);
-      if (hit < 0) return;
-      const b = S.regions.pages[key][hit];
-      if (!confirm(`${b.number ? b.number + '번' : '번호 없는'} 상자를 지울까요? 그만큼 캐시가 줄어듭니다.`)) return;
-      S.regions.pages[key].splice(hit, 1);
-      recount(); renderPreview();
+      openEditor(key, hit < 0 ? -1 : hit);
     });
   }
 }
@@ -826,6 +853,155 @@ $('#btn-restore').addEventListener('click', () => {
   S.regions = JSON.parse(JSON.stringify(S.regionsBackup));
   recount(); renderPreview(); toast('처음 탐지 결과로 되돌렸습니다.');
 });
+
+/* ── 영역 다듬기(과금 전, 사람이 직접) ──────────────────────────────────
+   빈 곳을 끌면 새 상자, 상자 안을 끌면 이동, 모서리를 끌면 크기 조절.
+   화면 좌표는 캔버스 픽셀, 저장 좌표는 쪽 대비 0~1 비율이다. */
+const ED = { key: null, sel: -1, page: null, W: 0, H: 0, drag: null, backup: null };
+const HANDLE = 9;                 // 모서리 손잡이 반경(캔버스 픽셀)
+const MIN_SIDE = 0.012;           // 상자 최소 변 길이(쪽 대비)
+
+function edBoxes() { return S.regions?.pages?.[ED.key] || []; }
+
+function edPaint() {
+  const canvas = $('#ed-canvas'), g = canvas.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, ED.W, ED.H);
+  if (ED.page) g.drawImage(ED.page, 0, 0, ED.W, ED.H);
+  edBoxes().forEach((b, i) => {
+    const x = b.x * ED.W, y = b.y * ED.H, w = b.w * ED.W, h = b.h * ED.H;
+    const on = i === ED.sel;
+    g.strokeStyle = on ? '#0F766E' : (b.number ? '#1D4ED8' : '#B45309');
+    g.lineWidth = on ? 3 : 2;
+    g.strokeRect(x, y, w, h);
+    if (on) {
+      g.fillStyle = 'rgba(15,118,110,.10)'; g.fillRect(x, y, w, h);
+      g.fillStyle = '#0F766E';
+      for (const [hx, hy] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]])
+        g.fillRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+    }
+    g.fillStyle = on ? '#0F766E' : (b.number ? 'rgba(29,78,216,.92)' : 'rgba(180,83,9,.92)');
+    g.fillRect(x, y, 40, 20);
+    g.fillStyle = '#fff'; g.font = '600 13px sans-serif';
+    g.fillText(String(b.number || '?'), x + 6, y + 15);
+  });
+  const b = edBoxes()[ED.sel];
+  $('#ed-sel').textContent = b ? `${b.number ? b.number + '번' : '번호 없는'} 상자` : '상자를 고르세요';
+  $('#ed-sel').className = b ? 'sel' : '';
+  $('#ed-num').disabled = !b; $('#ed-del').disabled = !b;
+  $('#ed-num').value = b?.number ?? '';
+  $('#ed-count').textContent = `이 쪽 ${edBoxes().length}문항`;
+}
+
+function edPoint(ev) {
+  const r = $('#ed-canvas').getBoundingClientRect();
+  return { x: (ev.clientX - r.left) / r.width * ED.W, y: (ev.clientY - r.top) / r.height * ED.H };
+}
+
+/** 누른 자리가 무엇인지: 선택 상자의 모서리 → 아무 상자 안 → 빈 곳. */
+function edHit(p) {
+  const sel = edBoxes()[ED.sel];
+  if (sel) {
+    const x = sel.x * ED.W, y = sel.y * ED.H, w = sel.w * ED.W, h = sel.h * ED.H;
+    const corners = { nw: [x, y], ne: [x + w, y], sw: [x, y + h], se: [x + w, y + h] };
+    for (const [name, [cx, cy]] of Object.entries(corners))
+      if (Math.abs(p.x - cx) <= HANDLE && Math.abs(p.y - cy) <= HANDLE)
+        return { mode: 'resize', index: ED.sel, corner: name };
+  }
+  const boxes = edBoxes();
+  for (let i = boxes.length - 1; i >= 0; i--) {          // 위에 그려진 것부터
+    const b = boxes[i];
+    if (p.x >= b.x * ED.W && p.x <= (b.x + b.w) * ED.W && p.y >= b.y * ED.H && p.y <= (b.y + b.h) * ED.H)
+      return { mode: 'move', index: i };
+  }
+  return { mode: 'draw', index: -1 };
+}
+
+function edApply(ev) {
+  const d = ED.drag; if (!d) return;
+  const p = edPoint(ev), boxes = edBoxes();
+  const clamp = (v) => Math.min(1, Math.max(0, v));
+  if (d.mode === 'draw') {
+    const x0 = clamp(Math.min(d.start.x, p.x) / ED.W), x1 = clamp(Math.max(d.start.x, p.x) / ED.W);
+    const y0 = clamp(Math.min(d.start.y, p.y) / ED.H), y1 = clamp(Math.max(d.start.y, p.y) / ED.H);
+    const box = boxes[d.index];
+    box.x = x0; box.y = y0; box.w = Math.max(MIN_SIDE, x1 - x0); box.h = Math.max(MIN_SIDE, y1 - y0);
+  } else if (d.mode === 'move') {
+    const box = boxes[d.index];
+    box.x = clamp(d.orig.x + (p.x - d.start.x) / ED.W);
+    box.y = clamp(d.orig.y + (p.y - d.start.y) / ED.H);
+    box.x = Math.min(box.x, 1 - box.w); box.y = Math.min(box.y, 1 - box.h);
+  } else {
+    const box = boxes[d.index], o = d.orig;
+    let x0 = o.x, y0 = o.y, x1 = o.x + o.w, y1 = o.y + o.h;
+    const px = clamp(p.x / ED.W), py = clamp(p.y / ED.H);
+    if (d.corner.includes('w')) x0 = px; else x1 = px;
+    if (d.corner.startsWith('n')) y0 = py; else y1 = py;
+    box.x = Math.min(x0, x1); box.y = Math.min(y0, y1);
+    box.w = Math.max(MIN_SIDE, Math.abs(x1 - x0)); box.h = Math.max(MIN_SIDE, Math.abs(y1 - y0));
+  }
+  box_dirty();
+}
+
+function box_dirty() { edPaint(); recount(); }
+
+$('#ed-stage').addEventListener('pointerdown', ev => {
+  if (!ED.key) return;
+  const p = edPoint(ev), hit = edHit(p);
+  if (hit.mode === 'draw') {
+    edBoxes().push({ id: `${ED.key}-h${Date.now().toString(36)}`, x: p.x / ED.W, y: p.y / ED.H,
+                     w: MIN_SIDE, h: MIN_SIDE, number: null, source: 'hand' });
+    ED.sel = edBoxes().length - 1;
+    ED.drag = { mode: 'draw', index: ED.sel, start: p };
+  } else {
+    ED.sel = hit.index;
+    const b = edBoxes()[hit.index];
+    ED.drag = { mode: hit.mode, index: hit.index, corner: hit.corner, start: p, orig: { ...b } };
+  }
+  $('#ed-stage').setPointerCapture(ev.pointerId);
+  box_dirty();
+});
+$('#ed-stage').addEventListener('pointermove', ev => { if (ED.drag) edApply(ev); });
+$('#ed-stage').addEventListener('pointerup', ev => {
+  if (!ED.drag) return;
+  ED.drag = null;
+  try { $('#ed-stage').releasePointerCapture(ev.pointerId); } catch (_) {}
+  box_dirty();
+});
+
+$('#ed-num').addEventListener('input', () => {
+  const b = edBoxes()[ED.sel]; if (!b) return;
+  const v = $('#ed-num').value.replace(/[^0-9]/g, '');
+  b.number = v ? Number(v) : null;
+  edPaint();
+});
+$('#ed-del').addEventListener('click', () => {
+  if (ED.sel < 0) return;
+  edBoxes().splice(ED.sel, 1); ED.sel = -1; box_dirty();
+});
+$('#ed-reset').addEventListener('click', () => {
+  if (!ED.backup) return;
+  S.regions.pages[ED.key] = JSON.parse(JSON.stringify(ED.backup));
+  ED.sel = -1; box_dirty();
+});
+$('#ed-done').addEventListener('click', () => { closeModal($('#m-edit')); renderPreview(); });
+document.addEventListener('keydown', ev => {
+  if (!$('#m-edit').classList.contains('open') || ED.sel < 0) return;
+  if (ev.target.tagName === 'INPUT') return;
+  if (ev.key === 'Delete' || ev.key === 'Backspace') { ev.preventDefault(); $('#ed-del').click(); }
+});
+
+async function openEditor(key, index) {
+  ED.key = key; ED.sel = index; ED.drag = null;
+  ED.backup = JSON.parse(JSON.stringify(S.regions?.pages?.[key] || []));
+  $('#ed-title').textContent = `${key.split(':')[1]}쪽 영역 다듬기`;
+  openModal('#m-edit');
+  const im = await pageImage(key);
+  ED.page = im;
+  const canvas = $('#ed-canvas');
+  ED.W = 860; ED.H = im ? Math.round(im.height * ED.W / im.width) : 1200;
+  canvas.width = ED.W; canvas.height = ED.H;
+  box_dirty();
+}
 
 /* ── 완료 후 검수 ──────────────────────────────────────────────────────── */
 const LABEL = { fragment_start: '앞 문항 꼬리가 섞임', no_question_end: '발문이 잘림',
@@ -1012,7 +1188,7 @@ $('#g-do').addEventListener('click', async () => {
 
 // 로컬에서만: 지원·디버깅용 상태 훅(공개 배포본에서는 노출되지 않는다)
 if (['127.0.0.1', 'localhost'].includes(location.hostname)) {
-  window.__ocr30 = { S, renderPreview, loadReview, recount, quote, api };
+  window.__ocr30 = { S, renderPreview, loadReview, recount, quote, api, openEditor, ED };
 }
 
 boot();
