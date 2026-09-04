@@ -118,8 +118,9 @@ main{max-width:1060px;margin:0 auto;padding:28px 20px 96px}
 .edit .stage{position:relative;line-height:0;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden;touch-action:none;cursor:crosshair}
 .edit .stage canvas{width:100%;height:auto;display:block}
 .edit .bar{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:13px;color:var(--ink-2);background:#fff;padding:8px 0}
-.edit .bar .inp{width:96px}
+.edit .bar .inp{width:78px}
 .edit .sel{font-weight:700;color:var(--ink)}
+.edit .bar .sep2{width:1px;height:20px;background:var(--line);margin:0 3px}
 .hintbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 13px;border-radius:10px;background:#F7F9FC;border:1px solid var(--line-2);font-size:13px;color:var(--ink-2)}
 .rev{display:grid;gap:10px;max-height:620px;overflow:auto;padding-right:4px}
 .rv{display:grid;grid-template-columns:150px 1fr;gap:12px;border:1px solid var(--line);border-radius:10px;padding:11px;background:#fff}
@@ -435,19 +436,21 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 
 <div class="modal" id="m-edit">
   <div class="box" style="width:min(900px,100%)">
-    <div class="hd"><h2 id="ed-title">영역 다듬기</h2><div class="spacer" style="flex:1"></div><button class="btn sm ghost" data-close>닫기</button></div>
+    <div class="hd"><h2 id="ed-title">영역 다듬기</h2><div class="spacer" style="flex:1"></div><button class="btn primary sm" id="ed-done">다 됐어요</button><button class="btn sm ghost" data-close>닫기</button></div>
     <div class="bd">
-      <p class="tiny" style="margin:0">빈 곳을 끌면 상자가 새로 생기고, 상자 안을 끌면 옮겨지고, 모서리를 끌면 크기가 바뀝니다. 여기까지는 과금되지 않습니다.</p>
+      <p class="tiny" style="margin:0">빈 곳을 끌면 상자가 새로 생기고, 상자 안을 끌면 옮겨지고, 모서리를 끌면 크기가 바뀝니다. 방향키 ←·→ 로 쪽을 넘기고, Delete 로 고른 상자를 지웁니다. 여기까지는 과금되지 않습니다.</p>
       <div class="edit">
         <div class="bar">
+          <button class="btn sm" id="ed-prev" title="← 방향키">← 이전 쪽</button>
+          <span id="ed-where" class="tiny"></span>
+          <button class="btn sm" id="ed-next" title="→ 방향키">다음 쪽 →</button>
+          <span class="sep2"></span>
           <span id="ed-sel">상자를 고르세요</span>
-          <label for="ed-num" class="tiny">번호</label>
-          <input class="inp" id="ed-num" inputmode="numeric" placeholder="예: 533" disabled>
-          <button class="btn sm" id="ed-del" disabled>이 상자 지우기</button>
+          <input class="inp" id="ed-num" inputmode="numeric" placeholder="번호" aria-label="문항 번호" disabled>
+          <button class="btn sm" id="ed-del" disabled>지우기</button>
           <span class="spacer" style="flex:1"></span>
           <span class="tiny" id="ed-count"></span>
-          <button class="btn sm" id="ed-reset">이 쪽만 되돌리기</button>
-          <button class="btn primary sm" id="ed-done">다 됐어요</button>
+          <button class="btn sm" id="ed-reset">이 쪽 되돌리기</button>
         </div>
         <div class="stage" id="ed-stage"><canvas id="ed-canvas"></canvas></div>
       </div>
@@ -984,9 +987,27 @@ $('#ed-reset').addEventListener('click', () => {
   ED.sel = -1; box_dirty();
 });
 $('#ed-done').addEventListener('click', () => { closeModal($('#m-edit')); renderPreview(); });
+/** 편집기에서 볼 수 있는 문제 쪽 목록(미리보기와 같은 순서). */
+function edPageKeys() { return Object.keys(S.regions?.pages || {}).filter(k => k.startsWith('problem')); }
+
+/** 앞뒤 쪽으로 이동. 고친 내용은 S.regions 에 그대로 남는다. */
+function edGo(step) {
+  const keys = edPageKeys();
+  const at = keys.indexOf(ED.key);
+  const next = at + step;
+  if (at < 0 || next < 0 || next >= keys.length) return;
+  openEditor(keys[next], -1);
+}
+
+$('#ed-prev').addEventListener('click', () => edGo(-1));
+$('#ed-next').addEventListener('click', () => edGo(1));
+
 document.addEventListener('keydown', ev => {
-  if (!$('#m-edit').classList.contains('open') || ED.sel < 0) return;
-  if (ev.target.tagName === 'INPUT') return;
+  if (!$('#m-edit').classList.contains('open')) return;
+  if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA') return;
+  if (ev.key === 'ArrowLeft' || ev.key === 'PageUp') { ev.preventDefault(); edGo(-1); return; }
+  if (ev.key === 'ArrowRight' || ev.key === 'PageDown') { ev.preventDefault(); edGo(1); return; }
+  if (ED.sel < 0) return;
   if (ev.key === 'Delete' || ev.key === 'Backspace') { ev.preventDefault(); $('#ed-del').click(); }
 });
 
@@ -994,6 +1015,10 @@ async function openEditor(key, index) {
   ED.key = key; ED.sel = index; ED.drag = null;
   ED.backup = JSON.parse(JSON.stringify(S.regions?.pages?.[key] || []));
   $('#ed-title').textContent = `${key.split(':')[1]}쪽 영역 다듬기`;
+  const keys = edPageKeys(), at = keys.indexOf(key);
+  $('#ed-where').textContent = at < 0 ? '' : `${at + 1} / ${keys.length}`;
+  $('#ed-prev').disabled = at <= 0;
+  $('#ed-next').disabled = at < 0 || at >= keys.length - 1;
   openModal('#m-edit');
   const im = await pageImage(key);
   ED.page = im;
@@ -1188,7 +1213,7 @@ $('#g-do').addEventListener('click', async () => {
 
 // 로컬에서만: 지원·디버깅용 상태 훅(공개 배포본에서는 노출되지 않는다)
 if (['127.0.0.1', 'localhost'].includes(location.hostname)) {
-  window.__ocr30 = { S, renderPreview, loadReview, recount, quote, api, openEditor, ED };
+  window.__ocr30 = { S, renderPreview, loadReview, recount, quote, api, openEditor, edGo, ED };
 }
 
 boot();
