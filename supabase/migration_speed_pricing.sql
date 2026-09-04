@@ -21,6 +21,13 @@ insert into public.ocr_pricing(key, cash_per_unit, note) values
 on conflict (key) do update set cash_per_unit = excluded.cash_per_unit,
                                 note = excluded.note, updated_at = now();
 
+-- 돌려주는 열이 늘어나므로 먼저 지운다. create or replace 로는 반환 타입을 바꿀 수 없다
+-- (42P13: cannot change return type of existing function, 2026-09-05 실행 오류).
+-- 인자가 늘어난 ocr_reserve 도 옛 3인자 판을 지운다 — 남겨 두면 호출이 모호해진다.
+drop function if exists public.ocr_wallet_me();
+drop function if exists public.ocr_reserve(text, text, integer);
+drop function if exists public.ocr_reserve(text, text, integer, text);
+
 -- 화면이 네 단가를 한 번에 받아 견적을 낸다
 create or replace function public.ocr_wallet_me()
 returns table(balance integer, reserved integer, available integer,
