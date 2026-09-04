@@ -110,6 +110,16 @@ main{max-width:1060px;margin:0 auto;padding:28px 20px 96px}
 .sync.run{background:#F5F7FF;border-color:var(--brand-line);color:var(--brand)}
 .sync .chip{display:inline-block;margin:2px 3px 0 0;padding:1px 7px;border-radius:6px;background:rgba(0,0,0,.06);font-variant-numeric:tabular-nums}
 .speed{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.kindpick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.kindpick .opt{display:grid;gap:2px;text-align:left;padding:11px 14px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer;font:inherit;color:inherit}
+.kindpick .opt:hover{border-color:var(--brand-line)}
+.kindpick .opt.on{border-color:var(--brand);background:var(--brand-soft);box-shadow:0 0 0 1px var(--brand) inset}
+.kindpick .opt b{font-size:14.5px}
+.kindpick .opt .t{font-size:12.5px;color:var(--ink-3)}
+.elective-rows{display:grid;gap:8px}
+.erow{display:grid;grid-template-columns:20px 96px 1fr;align-items:center;gap:9px;font-size:13.5px;cursor:pointer}
+.erow .inp{padding:7px 10px}
+.erow input[disabled]{background:#F4F6FA;color:var(--ink-3)}
 .speed .opt{display:grid;gap:2px;text-align:left;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer;font:inherit;color:inherit}
 .speed .opt:hover{border-color:var(--brand-line)}
 .speed .opt.on{border-color:var(--brand);background:var(--brand-soft);box-shadow:0 0 0 1px var(--brand) inset}
@@ -293,10 +303,32 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
             <b>해설 PDF <span class="opt">선택</span></b><span class="s">정답·풀이가 담긴 파일</span>
           </label>
         </div>
+        <div class="kindpick" id="kind-pick">
+          <button type="button" class="opt on" data-kind="textbook">
+            <b>문제집</b><span class="t">번호가 이어지는 교재·워크북</span>
+          </button>
+          <button type="button" class="opt" data-kind="exam">
+            <b>모의고사</b><span class="t">공통 뒤에 선택과목이 23번부터 다시 시작</span>
+          </button>
+        </div>
         <div class="grid2">
-          <div class="field"><label for="p-pages">문제 쪽 범위 <span class="tiny">(비우면 전체)</span></label><input class="inp" id="p-pages" placeholder="예: 7-140"></div>
+          <div class="field"><label for="p-pages"><span id="p-pages-label">문제 쪽 범위</span> <span class="tiny">(비우면 전체)</span></label><input class="inp" id="p-pages" placeholder="예: 7-140"></div>
           <div class="field"><label for="s-pages">해설 쪽 범위 <span class="tiny">(비우면 전체)</span></label><input class="inp" id="s-pages" placeholder="예: 3-96"></div>
         </div>
+        <div id="exam-fields" hidden>
+          <div class="field"><label>선택과목 <span class="tiny">(있는 것만 쪽 범위를 적으세요)</span></label>
+            <div class="elective-rows">
+              <label class="erow"><input type="checkbox" data-el="stats"><span>확률과통계</span>
+                <input class="inp" data-el-pages="stats" placeholder="예: 9-12" disabled></label>
+              <label class="erow"><input type="checkbox" data-el="calculus"><span>미적분</span>
+                <input class="inp" data-el-pages="calculus" placeholder="예: 13-16" disabled></label>
+              <label class="erow"><input type="checkbox" data-el="geometry"><span>기하</span>
+                <input class="inp" data-el-pages="geometry" placeholder="예: 17-20" disabled></label>
+            </div>
+            <div class="tiny" style="margin-top:6px">선택과목 문항은 23번부터 겹치므로 과목마다 8칸씩 밀어 번호를 매깁니다. 미적분 23번은 31번이 됩니다.</div>
+          </div>
+        </div>
+
         <div class="row">
           <button class="btn primary" id="btn-analyze" disabled>문항 영역 분석</button>
           <span class="tiny" id="upload-hint">문제 PDF를 올리면 분석할 수 있습니다.</span>
@@ -509,7 +541,7 @@ let API = (localStorage.getItem('ocr30_api') || location.origin).replace(/\/$/, 
 
 const S = { sb: null, session: null, wallet: null, service: false, worker: false, sid: null, files: {}, boxes: 0,
             state: null, regions: null, regionsBackup: null, result: null, audit: null, reviewAll: false,
-            format: { columns: 2, itemsPerColumn: 2 }, speed: 'fast', poll: null, tick: null, t0: 0, syncPoll: null };
+            format: { columns: 2, itemsPerColumn: 2 }, speed: 'fast', kind: 'textbook', poll: null, tick: null, t0: 0, syncPoll: null };
 
 let toastT;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 3600); }
@@ -703,8 +735,11 @@ async function analyze() {
   try {
     const st = await api(`/api/session/${S.sid}/analyze`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sections: [], endQuestion: 0, layoutMode: 'textbook',
-                             problemPages: $('#p-pages').value.trim() || null, solutionPages: $('#s-pages').value.trim() || null })
+      body: JSON.stringify({ sections: [], endQuestion: 0, layoutMode: S.kind,
+                             problemPages: $('#p-pages').value.trim() || null,
+                             commonPages: $('#p-pages').value.trim() || null,
+                             electives: S.kind === 'exam' ? electivesPayload() : [],
+                             solutionPages: $('#s-pages').value.trim() || null })
     });
     S.state = st;
     S.regions = st.regions || { version: 1, pages: {} };
@@ -805,6 +840,32 @@ async function loadSolutionIndex() {
       else renderSync();
     } catch (_) { clearInterval(S.syncPoll); }
   }, 1500);
+}
+
+/* ── 원본 종류: 문제집 / 모의고사 ─────────────────────────────────────────
+   모의고사는 선택과목마다 23번부터 다시 시작해 번호가 겹친다. 과목별 쪽 범위를 받아 서버가
+   구획을 나누고 번호를 밀어 준다(2026-09-05 사용자 "모의고사 선택 넣어줘"). */
+$$('#kind-pick .opt').forEach(btn => btn.addEventListener('click', () => {
+  S.kind = btn.dataset.kind;
+  $$('#kind-pick .opt').forEach(x => x.classList.toggle('on', x === btn));
+  const exam = S.kind === 'exam';
+  $('#exam-fields').hidden = !exam;
+  $('#p-pages-label').textContent = exam ? '공통 과목 쪽 범위' : '문제 쪽 범위';
+  $('#p-pages').placeholder = exam ? '예: 1-8' : '예: 7-140';
+}));
+
+$$('.erow input[type=checkbox]').forEach(box => box.addEventListener('change', () => {
+  const field = $(`[data-el-pages="${box.dataset.el}"]`);
+  field.disabled = !box.checked;
+  if (box.checked) field.focus(); else field.value = '';
+}));
+
+/* 고른 선택과목과 쪽 범위. 순서가 번호 보정 순서가 된다(첫째 +0, 둘째 +8, 셋째 +16). */
+function electivesPayload() {
+  return $$('.erow input[type=checkbox]:checked').map(box => ({
+    name: box.dataset.el,
+    pages: $(`[data-el-pages="${box.dataset.el}"]`).value.trim(),
+  }));
 }
 
 $$('#speed-pick .opt').forEach(btn => btn.addEventListener('click', () => {
@@ -1412,7 +1473,7 @@ $('#g-do').addEventListener('click', async () => {
 
 // 로컬에서만: 지원·디버깅용 상태 훅(공개 배포본에서는 노출되지 않는다)
 if (['127.0.0.1', 'localhost'].includes(location.hostname)) {
-  window.__ocr30 = { S, renderPreview, loadReview, recount, quote, api, openEditor, edGo, ED, renderSync, loadSolutionIndex };
+  window.__ocr30 = { S, renderPreview, loadReview, recount, quote, api, openEditor, edGo, ED, renderSync, loadSolutionIndex, electivesPayload };
 }
 
 boot();
