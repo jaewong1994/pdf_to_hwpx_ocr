@@ -103,6 +103,12 @@ main{max-width:1060px;margin:0 auto;padding:28px 20px 96px}
 .quote .q b{font-size:22px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .quote .q span{font-size:12.5px;color:#3E5BA9}
 .quote .sep{width:1px;height:34px;background:var(--brand-line)}
+.quote .kind{display:inline-block;margin-left:4px;padding:1px 7px;border-radius:20px;background:var(--brand-soft);color:var(--brand);font-size:11.5px;font-weight:600}
+.sync{padding:11px 14px;border-radius:10px;font-size:13.5px;line-height:1.6;border:1px solid}
+.sync.ok{background:#F0FDF6;border-color:#BBE7CE;color:#065F46}
+.sync.warn{background:#FFF8EC;border-color:#F5DDB0;color:#92400E}
+.sync.run{background:#F5F7FF;border-color:var(--brand-line);color:var(--brand)}
+.sync .chip{display:inline-block;margin:2px 3px 0 0;padding:1px 7px;border-radius:6px;background:rgba(0,0,0,.06);font-variant-numeric:tabular-nums}
 
 /* ── 영역 미리보기 · 검수 ─────────────────────────────────────────────── */
 .pages{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-top:4px}
@@ -301,12 +307,13 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
         <div class="quote">
           <div class="q"><b class="n" id="q-count">0</b><span>탐지된 문항</span></div>
           <div class="sep"></div>
-          <div class="q"><b class="n" id="q-cost">0</b><span>예상 캐시 (문항당 <span class="n" id="q-price">0</span>)</span></div>
+          <div class="q"><b class="n" id="q-cost">0</b><span>예상 캐시 (문항당 <span class="n" id="q-price">0</span>) <span id="q-kind" class="kind"></span></span></div>
           <div class="sep"></div>
           <div class="q"><b class="n" id="q-after">0</b><span>차감 후 잔액</span></div>
           <div class="spacer" style="flex:1"></div>
           <span class="tiny" id="q-note"></span>
         </div>
+        <div class="sync" id="sync" hidden></div>
         <div class="grid3">
           <div class="field"><label for="cf-title">문서 제목</label><input class="inp" id="cf-title" placeholder="예: 마플시너지 공통수학2"></div>
           <div class="field"><label>단 수</label><div class="seg" data-key="columns" role="group" aria-label="단 수"><button type="button" data-v="1" aria-pressed="false">1단</button><button type="button" data-v="2" aria-pressed="true">2단</button></div></div>
@@ -485,7 +492,7 @@ let API = (localStorage.getItem('ocr30_api') || location.origin).replace(/\/$/, 
 
 const S = { sb: null, session: null, wallet: null, service: false, worker: false, sid: null, files: {}, boxes: 0,
             state: null, regions: null, regionsBackup: null, result: null, audit: null, reviewAll: false,
-            format: { columns: 2, itemsPerColumn: 2 }, poll: null, tick: null, t0: 0 };
+            format: { columns: 2, itemsPerColumn: 2 }, poll: null, tick: null, t0: 0, syncPoll: null };
 
 let toastT;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 3600); }
@@ -659,22 +666,83 @@ async function analyze() {
     $('#q-note').textContent = `문제 ${Object.keys(pages).filter(k => k.startsWith('problem')).length}쪽 · 탐지 방식 ${st.regions?.region_mode || '기본'}`;
     $('#sec-confirm').scrollIntoView({ behavior: 'smooth', block: 'start' });
     renderPreview();
+    loadSolutionIndex();          // 해설 번호 싱크 — 무료, 배경에서 진행
   } catch (e) { toast('분석 실패: ' + e.message); }
   finally { btn.disabled = false; btn.textContent = '문항 영역 다시 분석'; }
 }
 $('#btn-analyze').addEventListener('click', analyze);
 $('#btn-reanalyze').addEventListener('click', analyze);
 
+/* 해설이 전부 짝을 맞췄으면 싼 단가, 하나라도 비면 생성 단가. 서버 예약 규칙과 같다. */
+function priceKind() {
+  const ix = S.state?.solutionIndex;
+  const matched = ix && ix.status === 'ready' && !ix.note && !(ix.missing || []).length;
+  return matched ? 'matched' : 'generated';
+}
+
 function quote() {
-  const price = S.wallet?.pricePerProblem || 0, cost = S.boxes * price;
+  const cheap = S.wallet?.pricePerProblem || 0;
+  const dear = S.wallet?.priceGenerated || cheap;
+  const price = priceKind() === 'matched' ? cheap : dear;
+  const cost = S.boxes * price;
   $('#q-count').textContent = num(S.boxes);
   $('#q-cost').textContent = num(cost);
   $('#q-price').textContent = num(price);
+  $('#q-kind').textContent = !S.service ? ''
+    : priceKind() === 'matched' ? '해설 첨부 단가' : '해설 생성 단가';
   const after = (S.wallet?.available || 0) - cost;
   $('#q-after').textContent = num(after);
   $('#q-after').style.color = after < 0 ? 'var(--bad)' : '';
   $('#btn-run').disabled = S.service && (S.boxes === 0 || after < 0);
   if (S.service && after < 0) $('#btn-run').title = '캐시가 부족합니다';
+  renderSync();
+}
+
+/* ── 해설 번호 싱크(과금 전 무료) ──────────────────────────────────────── */
+function renderSync() {
+  const box = $('#sync'), ix = S.state?.solutionIndex;
+  if (!ix) { box.hidden = true; return; }
+  box.hidden = false;
+  if (ix.status === 'running') {
+    const done = ix.done || 0, total = ix.total || 0;
+    box.className = 'sync run';
+    box.innerHTML = `<b>해설 번호를 읽는 중</b> ${done} / ${total}쪽 — 문제 번호와 짝을 맞춥니다. 과금되지 않습니다.`;
+    return;
+  }
+  if (ix.status === 'failed' || ix.note) {
+    box.className = 'sync warn';
+    box.innerHTML = `<b>해설 번호를 읽지 못했습니다.</b> ${esc(ix.note || '')} 해설 생성 단가로 계산합니다.`;
+    return;
+  }
+  const missing = ix.missing || [], extra = ix.extra || [];
+  const list = (arr) => arr.slice(0, 12).map(n => `<span class="chip">${n}</span>`).join('')
+    + (arr.length > 12 ? ` 외 ${arr.length - 12}개` : '');
+  if (!missing.length) {
+    box.className = 'sync ok';
+    box.innerHTML = `<b>해설이 모두 짝을 맞췄습니다.</b> 문제 ${num(ix.problems)} · 해설 ${num(ix.solutions)}`
+      + (extra.length ? ` · 이번 범위 밖 해설 ${extra.length}건` : '');
+    return;
+  }
+  box.className = 'sync warn';
+  box.innerHTML = `<b>해설이 없는 문항 ${missing.length}건</b> ${list(missing)}`
+    + `<div class="tiny" style="margin-top:6px">이 문항들은 AI가 해설을 새로 씁니다. 해설 쪽 범위를 넓히면 값이 내려갑니다.</div>`;
+}
+
+async function loadSolutionIndex() {
+  if (!S.sid || !S.files.solution) return;
+  try { S.state = await api(`/api/session/${S.sid}/solution_index`, { method: 'POST', body: '' }); }
+  catch (e) { return; }
+  renderSync();
+  clearInterval(S.syncPoll);
+  S.syncPoll = setInterval(async () => {
+    try {
+      const st = await api(`/api/session/${S.sid}`);
+      S.state = st;
+      const ix = st.solutionIndex;
+      if (!ix || ix.status !== 'running') { clearInterval(S.syncPoll); quote(); }
+      else renderSync();
+    } catch (_) { clearInterval(S.syncPoll); }
+  }, 1500);
 }
 
 $$('.seg[data-key]').forEach(seg => seg.addEventListener('click', e => {
@@ -1275,7 +1343,7 @@ $('#g-do').addEventListener('click', async () => {
 
 // 로컬에서만: 지원·디버깅용 상태 훅(공개 배포본에서는 노출되지 않는다)
 if (['127.0.0.1', 'localhost'].includes(location.hostname)) {
-  window.__ocr30 = { S, renderPreview, loadReview, recount, quote, api, openEditor, edGo, ED };
+  window.__ocr30 = { S, renderPreview, loadReview, recount, quote, api, openEditor, edGo, ED, renderSync, loadSolutionIndex };
 }
 
 boot();
