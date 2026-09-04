@@ -104,6 +104,28 @@ main{max-width:1060px;margin:0 auto;padding:28px 20px 96px}
 .quote .q span{font-size:12.5px;color:#3E5BA9}
 .quote .sep{width:1px;height:34px;background:var(--brand-line)}
 
+/* ── 영역 미리보기 · 검수 ─────────────────────────────────────────────── */
+.pages{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-top:4px}
+.pg{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
+.pg .cv{position:relative;line-height:0;cursor:crosshair}
+.pg canvas{width:100%;height:auto;display:block}
+.pg .cap{display:flex;align-items:center;gap:6px;padding:7px 9px;font-size:12.5px;color:var(--ink-2);border-top:1px solid var(--line-2)}
+.pg .cap b{font-weight:700;color:var(--ink)}
+.pg .cap .sp{flex:1}
+.hintbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 13px;border-radius:10px;background:#F7F9FC;border:1px solid var(--line-2);font-size:13px;color:var(--ink-2)}
+.rev{display:grid;gap:10px;max-height:620px;overflow:auto;padding-right:4px}
+.rv{display:grid;grid-template-columns:150px 1fr;gap:12px;border:1px solid var(--line);border-radius:10px;padding:11px;background:#fff}
+.rv.flag{border-color:#F3C7C3;background:#FEF7F6}
+.rv canvas,.rv img{width:100%;height:auto;border:1px solid var(--line-2);border-radius:6px;display:block}
+.rv .t{font-size:13.5px;color:var(--ink-2);line-height:1.55;max-height:130px;overflow:auto}
+.rv .h{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.rv .h b{font-size:14px}
+.tag{font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--bad-soft);color:var(--bad)}
+.tag.ok{background:var(--ok-soft);color:var(--ok)}
+.figs{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px}
+.figs img{width:96px;height:auto}
+@media (max-width:640px){.rv{grid-template-columns:1fr}}
+
 /* ── 진행 화면 ─────────────────────────────────────────────────────────── */
 .prog{display:grid;grid-template-columns:auto 1fr;gap:26px;align-items:center;padding:26px 22px}
 @media (max-width:720px){.prog{grid-template-columns:1fr;justify-items:center;text-align:center}}
@@ -149,6 +171,8 @@ th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line-2)}
 th{font-size:12px;font-weight:500;color:var(--ink-3);background:#FAFCFE}
 tbody tr:last-child td{border-bottom:0}
 td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+
+
 
 /* ── 모달 ──────────────────────────────────────────────────────────────── */
 .modal{position:fixed;inset:0;z-index:60;background:rgba(15,23,42,.34);display:none;place-items:center;padding:20px}
@@ -278,6 +302,15 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
           <div class="field"><label>단당 문항</label><div class="seg" data-key="itemsPerColumn" role="group" aria-label="단당 문항 수"><button type="button" data-v="1" aria-pressed="false">1문항</button><button type="button" data-v="2" aria-pressed="true">2문항</button></div></div>
         </div>
         <div class="field" id="key-field" hidden><label for="cf-key">Gemini API 키 <span class="tiny">(개인 키 모드)</span></label><input class="inp" id="cf-key" type="password" placeholder="AIza…"></div>
+        <div id="preview-wrap" hidden>
+          <div class="hintbar">
+            <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+            <span>잘못 잡힌 상자를 눌러 지우면 그만큼 캐시도 줄어듭니다. <b>여기까지는 과금되지 않습니다.</b></span>
+            <span class="sp" style="flex:1"></span>
+            <button class="btn sm" id="btn-restore">되돌리기</button>
+          </div>
+          <div class="pages" id="pages"></div>
+        </div>
         <div class="row">
           <button class="btn primary lg" id="btn-run">맡기고 시작하기</button>
           <button class="btn" id="btn-reanalyze">다시 분석</button>
@@ -308,7 +341,14 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
         <button class="btn primary lg" id="btn-download"><svg class="icon" viewBox="0 0 24 24"><path d="M12 4v12M8 12l4 4 4-4"/><path d="M4 20h16"/></svg>내려받기</button>
       </div>
       <div class="stats" id="done-stats"></div>
-      <div class="pad" style="border-top:1px solid var(--line-2)"><button class="btn" id="btn-new">새 작업 맡기기</button></div>
+      <div class="pad" style="border-top:1px solid var(--line-2);display:grid;gap:14px">
+        <div class="hintbar" id="audit-bar">검수 결과를 불러오는 중…</div>
+        <div class="rev" id="review" hidden></div>
+        <div class="row">
+          <button class="btn" id="btn-review-all">전체 문항 보기</button>
+          <button class="btn" id="btn-new">새 작업 맡기기</button>
+        </div>
+      </div>
     </section>
 
   </div>
@@ -409,10 +449,19 @@ if (qs.get('api')) localStorage.setItem('ocr30_api', qs.get('api').replace(/\/$/
 let API = (localStorage.getItem('ocr30_api') || location.origin).replace(/\/$/, '');
 
 const S = { sb: null, session: null, wallet: null, service: false, worker: false, sid: null, files: {}, boxes: 0,
+            state: null, regions: null, regionsBackup: null, result: null, audit: null, reviewAll: false,
             format: { columns: 2, itemsPerColumn: 2 }, poll: null, tick: null, t0: 0 };
 
 let toastT;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 3600); }
+
+/* 쪽 그림·문항 그림 주소. <img>·Image() 는 헤더를 못 붙이므로 서버가 받아주는 ?token= 로 넘긴다. */
+function imageSrc(url) {
+  const base = /^https?:\/\//.test(url) ? url : API + url;   // /result 는 절대주소로 준다
+  const token = S.session?.access_token;
+  if (!token) return base;
+  return base + (base.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+}
 
 async function api(path, opt = {}) {
   const headers = Object.assign({}, opt.headers);
@@ -564,13 +613,17 @@ async function analyze() {
       body: JSON.stringify({ sections: [], endQuestion: 0, layoutMode: 'textbook',
                              problemPages: $('#p-pages').value.trim() || null, solutionPages: $('#s-pages').value.trim() || null })
     });
-    const pages = (st.regions?.pages) || {};
-    S.boxes = Object.entries(pages).filter(([k]) => k.startsWith('problem')).reduce((n, [, v]) => n + (v?.length || 0), 0);
+    S.state = st;
+    S.regions = st.regions || { version: 1, pages: {} };
+    S.regionsBackup = JSON.parse(JSON.stringify(S.regions));
+    S.result = null; S.audit = null;
+    const pages = S.regions.pages || {};
+    recount();
     $('#step1').classList.add('done');
     $('#sec-confirm').hidden = false;
-    quote();
     $('#q-note').textContent = `문제 ${Object.keys(pages).filter(k => k.startsWith('problem')).length}쪽 · 탐지 방식 ${st.regions?.region_mode || '기본'}`;
     $('#sec-confirm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    renderPreview();
   } catch (e) { toast('분석 실패: ' + e.message); }
   finally { btn.disabled = false; btn.textContent = '문항 영역 다시 분석'; }
 }
@@ -636,6 +689,10 @@ $('#btn-run').addEventListener('click', async () => {
                   textFont: '나눔고딕', textSize: 10, equationFont: 'HYhwpEQ', equationSize: 11,
                   noteMode: 'endnote', generateMissingSolutions: true, regionMode: 'problem_boxes' };
     if (!S.service && !cfg.apiKey) { toast('API 키를 입력해주세요.'); return; }
+    // 사람이 손본 영역을 먼저 저장한다 — 예약 금액은 이 상자 수로 계산된다
+    if (S.regions) {
+      await api(`/api/session/${S.sid}/regions`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(S.regions) });
+    }
     await api(`/api/session/${S.sid}/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
     $('#step2').classList.add('done');
     $('#sec-progress').hidden = false; $('#sec-done').hidden = true;
@@ -672,6 +729,7 @@ async function finish(state) {
   if (S.service) cells.push(['소모 캐시', num(c.spent)], ['돌려받은 예약', num(c.released)], ['남은 잔액', num(w?.balance)]);
   $('#done-stats').innerHTML = cells.map(([k, v]) => `<div><b class="n">${v}</b><span>${esc(k)}</span></div>`).join('');
   $('#sec-done').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  loadReview();
 }
 
 $('#btn-download').addEventListener('click', async () => {
@@ -690,12 +748,164 @@ $('#btn-download').addEventListener('click', async () => {
 
 $('#btn-new').addEventListener('click', () => {
   S.sid = null; S.files = {}; S.boxes = 0;
+  S.state = S.regions = S.regionsBackup = S.result = S.audit = null; S.reviewAll = false;
+  $('#preview-wrap').hidden = true; $('#pages').innerHTML = ''; $('#review').innerHTML = ''; $('#review').hidden = true;
   $$('.drop').forEach((z, i) => { z.classList.remove('filled'); $('b', z).innerHTML = i === 0 ? '문제 PDF' : '해설 PDF <span class="opt">선택</span>'; $('.s', z).textContent = i === 0 ? '클릭하거나 파일을 끌어다 놓으세요' : '정답·풀이가 담긴 파일'; $('input', z).value = ''; });
   ['#sec-confirm', '#sec-progress', '#sec-done'].forEach(s => $(s).hidden = true);
   $('#step1').classList.remove('done'); $('#step2').classList.remove('done');
   $('#btn-analyze').disabled = true; $('#cf-title').value = '';
   window.scrollTo({ top: 0, behavior: 'smooth' });
 });
+
+/* ── 영역 미리보기(과금 전) ────────────────────────────────────────────── */
+const IMG = {};                       // 쪽 그림 캐시
+function pageImage(key) {
+  if (IMG[key]) return IMG[key];
+  IMG[key] = new Promise(res => {
+    const page = (S.state?.pages || []).find(p => p.key === key);
+    if (!page?.imageUrl) return res(null);
+    const im = new Image();
+    im.crossOrigin = 'anonymous';
+    im.onload = () => res(im);
+    im.onerror = () => res(null);
+    im.src = imageSrc(page.imageUrl);
+  });
+  return IMG[key];
+}
+
+async function renderPreview() {
+  const wrap = $('#pages');
+  const keys = Object.keys(S.regions?.pages || {}).filter(k => k.startsWith('problem'));
+  $('#preview-wrap').hidden = keys.length === 0;
+  wrap.innerHTML = '';
+  for (const key of keys) {
+    const boxes = S.regions.pages[key] || [];
+    const cell = document.createElement('div');
+    cell.className = 'pg';
+    cell.innerHTML = `<div class="cv"><canvas></canvas></div>
+      <div class="cap"><b>${esc(key.split(':')[1])}쪽</b><span class="sp"></span><span class="n">${boxes.length}문항</span></div>`;
+    wrap.appendChild(cell);
+    const canvas = $('canvas', cell);
+    const im = await pageImage(key);
+    const W = 560, H = im ? Math.round(im.height * W / im.width) : 780;
+    canvas.width = W; canvas.height = H;
+    const g = canvas.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+    if (im) g.drawImage(im, 0, 0, W, H);
+    boxes.forEach((b, i) => {
+      g.strokeStyle = b.number ? '#1D4ED8' : '#B45309';
+      g.lineWidth = 3;
+      g.strokeRect(b.x * W, b.y * H, b.w * W, b.h * H);
+      g.fillStyle = b.number ? 'rgba(29,78,216,.9)' : 'rgba(180,83,9,.9)';
+      g.fillRect(b.x * W, b.y * H, 34, 18);
+      g.fillStyle = '#fff'; g.font = '600 12px sans-serif';
+      g.fillText(String(b.number || '?'), b.x * W + 5, b.y * H + 13);
+    });
+    $('.cv', cell).addEventListener('click', ev => {
+      const r = canvas.getBoundingClientRect();
+      const rx = (ev.clientX - r.left) / r.width, ry = (ev.clientY - r.top) / r.height;
+      const hit = (S.regions.pages[key] || []).findIndex(b => rx >= b.x && rx <= b.x + b.w && ry >= b.y && ry <= b.y + b.h);
+      if (hit < 0) return;
+      const b = S.regions.pages[key][hit];
+      if (!confirm(`${b.number ? b.number + '번' : '번호 없는'} 상자를 지울까요? 그만큼 캐시가 줄어듭니다.`)) return;
+      S.regions.pages[key].splice(hit, 1);
+      recount(); renderPreview();
+    });
+  }
+}
+
+function recount() {
+  S.boxes = Object.entries(S.regions?.pages || {})
+    .filter(([k]) => k.startsWith('problem'))
+    .reduce((n, [, v]) => n + (v?.length || 0), 0);
+  quote();
+}
+
+$('#btn-restore').addEventListener('click', () => {
+  if (!S.regionsBackup) return;
+  S.regions = JSON.parse(JSON.stringify(S.regionsBackup));
+  recount(); renderPreview(); toast('처음 탐지 결과로 되돌렸습니다.');
+});
+
+/* ── 완료 후 검수 ──────────────────────────────────────────────────────── */
+const LABEL = { fragment_start: '앞 문항 꼬리가 섞임', no_question_end: '발문이 잘림',
+  text_only_figure: '그림이 아니라 글줄', clipped_figure: '그림이 잘림',
+  number_noise: '엉뚱한 번호', unbound_solution: '해설 없음',
+  number_gap: '문항을 놓침', empty_body: '본문이 빔' };
+
+async function loadReview() {
+  let report = null;
+  try { report = await api(`/api/session/${S.sid}/audit`); } catch (_) {}
+  const bar = $('#audit-bar');
+  if (!report) { bar.textContent = '검수 결과를 불러오지 못했습니다.'; return; }
+  S.audit = report;
+  const bad = Object.entries(report.counts || {}).filter(([, n]) => n > 0);
+  if (!bad.length) {
+    bar.innerHTML = `<span class="tag ok">이상 없음</span> 문항 ${num(report.problems)}건을 검사했고 걸린 항목이 없습니다.`;
+  } else {
+    bar.innerHTML = `<span class="tag">확인 ${num(report.total_defects)}건</span> `
+      + bad.map(([k, n]) => `${esc(LABEL[k] || k)} ${n}`).join(' · ')
+      + ' — 아래에서 해당 문항만 확인하세요.';
+  }
+  await renderReview(false);
+}
+
+function flaggedNumbers(report) {
+  const out = new Set();
+  for (const [, items] of Object.entries(report.findings || {}))
+    for (const it of items) {
+      const n = typeof it === 'number' ? it : it?.number;
+      if (n) out.add(Number(n));
+    }
+  return out;
+}
+
+async function renderReview(all) {
+  const box = $('#review');
+  const report = S.audit;
+  if (!report) return;
+  let result = S.result;
+  if (!result) {
+    try { result = S.result = await api(`/api/session/${S.sid}/result`); } catch (_) { return; }
+  }
+  const flagged = flaggedNumbers(report);
+  const problems = (result.problems || []).filter(p => all || flagged.has(Number(p.problem_number)));
+  box.hidden = problems.length === 0;
+  box.innerHTML = '';
+  for (const p of problems) {
+    const n = Number(p.problem_number);
+    const row = document.createElement('div');
+    row.className = 'rv' + (flagged.has(n) ? ' flag' : '');
+    const reasons = Object.entries(report.findings || {})
+      .filter(([, items]) => items.some(it => (typeof it === 'number' ? it : it?.number) === n))
+      .map(([k]) => LABEL[k] || k);
+    row.innerHTML = `<div><canvas></canvas></div>
+      <div><div class="h"><b>${n}번</b>${reasons.map(r => `<span class="tag">${esc(r)}</span>`).join('')}</div>
+      <div class="t">${esc((p.body_text || '').slice(0, 300))}</div>
+      <div class="figs">${(p.figure_urls || []).map(u => `<img src="${esc(imageSrc(u))}" alt="">`).join('')}</div></div>`;
+    box.appendChild(row);
+    drawRegion($('canvas', row), n);
+  }
+  $('#btn-review-all').textContent = all ? '문제 있는 문항만' : '전체 문항 보기';
+  S.reviewAll = all;
+}
+
+async function drawRegion(canvas, number) {
+  for (const [key, boxes] of Object.entries(S.regions?.pages || {})) {
+    if (!key.startsWith('problem')) continue;
+    const b = (boxes || []).find(x => Number(x.number) === number);
+    if (!b) continue;
+    const im = await pageImage(key);
+    if (!im) return;
+    const sx = b.x * im.width, sy = b.y * im.height, sw = b.w * im.width, sh = b.h * im.height;
+    const W = 300, H = Math.max(40, Math.round(sh * W / sw));
+    canvas.width = W; canvas.height = H;
+    canvas.getContext('2d').drawImage(im, sx, sy, sw, sh, 0, 0, W, H);
+    return;
+  }
+}
+
+$('#btn-review-all').addEventListener('click', () => renderReview(!S.reviewAll));
 
 /* ── 모달 ──────────────────────────────────────────────────────────────── */
 function openModal(id) { $(id).classList.add('open'); document.body.style.overflow = 'hidden'; }
@@ -799,6 +1009,11 @@ $('#g-do').addEventListener('click', async () => {
     await refreshWallet();
   } catch (e) { toast('지급 실패: ' + e.message); }
 });
+
+// 로컬에서만: 지원·디버깅용 상태 훅(공개 배포본에서는 노출되지 않는다)
+if (['127.0.0.1', 'localhost'].includes(location.hostname)) {
+  window.__ocr30 = { S, renderPreview, loadReview, recount, quote, api };
+}
 
 boot();
 })();
