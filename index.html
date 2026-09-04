@@ -41,7 +41,7 @@ a{color:var(--brand)}
 .chip{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 12px;border-radius:999px;border:1px solid var(--line);background:#fff;font-size:13.5px;font-weight:500;white-space:nowrap}
 .chip .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
 .chip.cash{border-color:var(--brand-line);background:var(--brand-soft);color:#12379E}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:38px;padding:0 15px;border-radius:var(--r-sm);border:1px solid var(--line);background:#fff;font-size:14px;font-weight:500;cursor:pointer;transition:background .18s ease,border-color .18s ease,box-shadow .18s ease,transform .18s ease}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;height:38px;padding:0 15px;border-radius:var(--r-sm);border:1px solid var(--line);background:#fff;font-size:14px;font-weight:500;cursor:pointer;transition:background .18s ease,border-color .18s ease,box-shadow .18s ease,transform .18s ease}
 .btn:hover:not(:disabled){background:#F8FAFD;border-color:#D3DCEA}
 .btn:active:not(:disabled){transform:translateY(1px)}
 .btn:disabled{opacity:.45;cursor:not-allowed}
@@ -340,8 +340,26 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 <!-- 관리자 지급 모달 -->
 <div class="modal" id="m-admin">
   <div class="box" style="width:min(520px,100%)">
-    <div class="hd"><h2>캐시 지급</h2><div class="spacer" style="flex:1"></div><button class="btn sm ghost" data-close>닫기</button></div>
+    <div class="hd"><h2>계정과 캐시</h2><div class="spacer" style="flex:1"></div><button class="btn sm ghost" data-close>닫기</button></div>
     <div class="bd">
+      <section>
+        <h3 style="font-size:14px;margin:0 0 8px">계정 만들기</h3>
+        <div class="grid2">
+          <div class="field"><label for="c-email">이메일</label><input class="inp" id="c-email" type="email" placeholder="friend@example.com" autocomplete="off"></div>
+          <div class="field"><label for="c-pw">비밀번호 <span class="tiny">(8자 이상)</span></label>
+            <div class="row"><input class="inp" id="c-pw" type="text" placeholder="자동 생성됨" autocomplete="off"><button class="btn sm" id="c-gen" type="button">새로 만들기</button></div>
+          </div>
+        </div>
+        <div class="grid2" style="margin-top:12px">
+          <div class="field"><label for="c-grant">개설 지급 캐시</label><input class="inp n" id="c-grant" type="number" step="1000" value="3000"></div>
+          <div class="field"><label for="c-note">메모</label><input class="inp" id="c-note" placeholder="지인 체험"></div>
+        </div>
+        <div class="row" style="margin-top:12px"><button class="btn primary" id="c-do">계정 만들기</button><span class="tiny" id="c-state">작업 서버가 켜져 있어야 합니다.</span></div>
+        <div class="bad-note" id="c-out" hidden style="margin-top:10px"></div>
+      </section>
+      <hr style="border:0;border-top:1px solid var(--line-2);margin:4px 0">
+      <section>
+      <h3 style="font-size:14px;margin:0 0 8px">캐시 지급</h3>
       <div class="field"><label for="g-email">받는 사람 이메일</label>
         <div class="row"><input class="inp" id="g-email" type="email" placeholder="friend@example.com"><button class="btn" id="g-find">조회</button></div>
         <p class="tiny" id="g-found"></p>
@@ -351,6 +369,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
         <div class="field"><label for="g-note">메모</label><input class="inp" id="g-note" placeholder="지인 체험분"></div>
       </div>
       <div class="row"><button class="btn primary" id="g-do" disabled>지급</button><span class="tiny">1캐시 = 1원 기준입니다.</span></div>
+      </section>
     </div>
   </div>
 </div>
@@ -405,6 +424,21 @@ async function api(path, opt = {}) {
   const data = await res.json();
   if (!res.ok || data.ok === false) throw new Error(data.error || ('요청 실패 (' + res.status + ')'));
   return data;
+}
+
+/* 지갑·원장·관리자 기능은 Supabase 를 직접 부른다 — 작업 서버가 꺼져 있어도 된다.
+   파일 업로드·판독·조판만 작업 서버가 필요하다. */
+async function sbRpc(name, params = {}) {
+  if (!S.sb) throw new Error('로그인 정보가 없습니다.');
+  const { data, error } = await S.sb.rpc(name, params);
+  if (error) throw new Error(error.message);
+  return data;
+}
+async function sbRows(table, columns, limit) {
+  if (!S.sb) return [];
+  const { data, error } = await S.sb.from(table).select(columns).order('created_at', { ascending: false }).limit(limit);
+  if (error) throw new Error(error.message);
+  return data || [];
 }
 
 /* ── 부팅 ──────────────────────────────────────────────────────────────── */
@@ -475,7 +509,16 @@ $('#btn-logout').addEventListener('click', async () => { await S.sb.auth.signOut
 async function refreshWallet() {
   if (!S.service) return null;
   try {
-    const w = await api('/api/me'); S.wallet = w;
+    let w;
+    if (S.sb) {
+      const rows = await sbRpc('ocr_wallet_me');
+      const r = (Array.isArray(rows) ? rows[0] : rows) || {};
+      w = { balance: r.balance || 0, reserved: r.reserved || 0, available: r.available || 0,
+            pricePerProblem: r.price_per_problem || 0, isAdmin: !!r.is_admin };
+    } else {
+      w = await api('/api/me');
+    }
+    S.wallet = w;
     $('#cash-text').textContent = num(w.available);
     $('#a-bal').textContent = num(w.balance); $('#a-res').textContent = num(w.reserved);
     $('#a-avail').textContent = num(w.available); $('#a-price').textContent = num(w.pricePerProblem);
@@ -664,7 +707,12 @@ $('#btn-acct').addEventListener('click', async () => {
   openModal('#m-acct'); await refreshWallet();
   const fmtT = t => new Date(t).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   try {
-    const [j, l] = await Promise.all([api('/api/me/jobs'), api('/api/me/ledger')]);
+    const [j, l] = S.sb
+      ? await Promise.all([
+          sbRows('ocr_jobs', 'id,title,status,problems_expected,problems_approved,reserved_cash,spent_cash,created_at', 30).then(rows => ({ rows })),
+          sbRows('ocr_cash_ledger', 'id,delta,kind,job_id,note,created_at', 50).then(rows => ({ rows })),
+        ])
+      : await Promise.all([api('/api/me/jobs'), api('/api/me/ledger')]);
     const st = { reserved: '예약', running: '진행 중', complete: '완료', failed: '실패', released: '해제' };
     $('#t-jobs tbody').innerHTML = (j.rows || []).map(r => `<tr><td>${fmtT(r.created_at)}</td><td>${esc(r.title || '무제')}</td><td>${st[r.status] || r.status}</td><td class="n">${num(r.problems_expected)}</td><td class="n">${num(r.problems_approved)}</td><td class="n">${num(r.spent_cash)}</td></tr>`).join('') || '<tr><td colspan="6" class="tiny">작업 없음</td></tr>';
     const kind = { grant: '지급', charge: '충전', reserve: '예약', release: '해제', spend: '소모', refund: '환불', adjust: '조정' };
@@ -673,7 +721,12 @@ $('#btn-acct').addEventListener('click', async () => {
 });
 
 let grantTarget = null;
-$('#btn-admin').addEventListener('click', () => { openModal('#m-admin'); });
+$('#btn-admin').addEventListener('click', () => {
+  if (!$('#c-pw').value) $('#c-pw').value = newPassword();
+  $('#c-state').textContent = S.worker ? '작업 서버 연결됨' : '계정 만들기는 작업 서버가 켜져 있어야 합니다. 캐시 지급은 지금도 됩니다.';
+  $('#c-do').disabled = !S.worker;
+  openModal('#m-admin');
+});
 $('#btn-retry').addEventListener('click', retryWorker);
 $('#btn-server').addEventListener('click', () => { $('#srv-input').value = API; $('#srv-state').textContent = S.worker ? '지금 연결됨' : '연결 안 됨'; openModal('#m-server'); });
 $('#btn-setaddr').addEventListener('click', () => { $('#srv-input').value = API; openModal('#m-server'); });
@@ -689,13 +742,44 @@ $('#srv-save').addEventListener('click', async () => {
 $('#g-find').addEventListener('click', async () => {
   grantTarget = null; $('#g-do').disabled = true;
   try {
-    const r = await api('/api/admin/find_user?email=' + encodeURIComponent($('#g-email').value.trim()));
-    const u = (r.rows || [])[0];
+    const email = $('#g-email').value.trim();
+    const rows = S.sb ? await sbRpc('ocr_find_user', { p_email: email })
+                      : (await api('/api/admin/find_user?email=' + encodeURIComponent(email))).rows;
+    const u = (rows || [])[0];
     if (!u) { $('#g-found').textContent = '해당 이메일의 계정이 없습니다.'; return; }
     grantTarget = u;
     $('#g-found').textContent = `${u.email} · ${u.account_type || '역할 없음'}`;
     $('#g-do').disabled = false;
   } catch (e) { $('#g-found').textContent = e.message; }
+});
+function newPassword() {
+  const set = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  return Array.from(crypto.getRandomValues(new Uint32Array(12)), n => set[n % set.length]).join('');
+}
+$('#c-gen').addEventListener('click', () => { $('#c-pw').value = newPassword(); });
+$('#c-do').addEventListener('click', async () => {
+  const email = $('#c-email').value.trim();
+  if (!$('#c-pw').value) $('#c-pw').value = newPassword();
+  const password = $('#c-pw').value;
+  if (!email.includes('@')) { toast('이메일을 확인해주세요.'); return; }
+  if (password.length < 8) { toast('비밀번호는 8자 이상이어야 합니다.'); return; }
+  if (!S.worker) { toast('계정 만들기는 작업 서버가 켜져 있어야 합니다.'); return; }
+  const grant = parseInt($('#c-grant').value, 10) || 0;
+  if (!confirm(`${email} 계정을 만들고 ${num(grant)} 캐시를 지급합니다.`)) return;
+  const btn = $('#c-do'); btn.disabled = true; btn.textContent = '만드는 중…';
+  try {
+    const r = await api('/api/admin/create_user', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, grant, note: $('#c-note').value.trim() }) });
+    $('#c-out').hidden = false;
+    $('#c-out').style.cssText = 'margin-top:10px;background:var(--ok-soft);border-color:#BEE7D8;color:#0B6B4B';
+    $('#c-out').textContent = `만들었습니다 — ${r.email} / 비밀번호 ${password} · 지급 ${num(r.granted)} 캐시. 이 비밀번호를 전달하세요.`;
+    $('#c-email').value = ''; $('#c-pw').value = '';
+    await refreshWallet();
+  } catch (e) {
+    $('#c-out').hidden = false;
+    $('#c-out').style.cssText = 'margin-top:10px';
+    $('#c-out').textContent = e.message;
+  } finally { btn.disabled = false; btn.textContent = '계정 만들기'; }
 });
 $('#g-do').addEventListener('click', async () => {
   if (!grantTarget) return;
@@ -703,8 +787,14 @@ $('#g-do').addEventListener('click', async () => {
   if (!amount) { toast('금액을 입력하세요.'); return; }
   if (!confirm(`${grantTarget.email} 에게 ${num(amount)} 캐시를 ${amount > 0 ? '지급' : '회수'}합니다.`)) return;
   try {
-    const r = await api('/api/admin/grant', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: grantTarget.user_id, amount, note: $('#g-note').value.trim() }) });
-    toast(`처리됨 · 상대 잔액 ${num(r.balance)} 캐시`);
+    let balance;
+    if (S.sb) {
+      const rows = await sbRpc('ocr_grant_cash', { p_user: grantTarget.user_id, p_amount: amount, p_note: $('#g-note').value.trim() });
+      balance = ((Array.isArray(rows) ? rows[0] : rows) || {}).balance;
+    } else {
+      balance = (await api('/api/admin/grant', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: grantTarget.user_id, amount, note: $('#g-note').value.trim() }) })).balance;
+    }
+    toast(`처리됨 · 상대 잔액 ${num(balance)} 캐시`);
     $('#g-amount').value = '';
     await refreshWallet();
   } catch (e) { toast('지급 실패: ' + e.message); }
