@@ -562,9 +562,33 @@ async function checkWorker() {
   } catch { S.worker = false; return null; }
 }
 
+/* 지금 켜져 있는 작업 서버 주소를 저장소에서 찾아온다.
+
+   무료 터널은 띄울 때마다 주소가 바뀐다. 그래서 서버가 뜰 때 자기 주소를 이 저장소의 worker.json 에
+   적어 두고, 화면이 그것을 읽는다. 지인은 링크를 새로 받을 필요가 없다(09-04 사용자: 고정 주소가 필요해).
+   저장된 주소가 살아 있으면 그대로 쓰고, 죽어 있을 때만 찾아본다. */
+async function discoverWorker() {
+  try {
+    const res = await fetch('worker.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return null;
+    const info = await res.json();
+    const url = String(info.url || '').replace(/\/$/, '');
+    return url && /^https?:\/\//.test(url) ? url : null;
+  } catch { return null; }
+}
+
 async function boot() {
   $('#lg-host').textContent = '작업 서버: ' + API;
-  const health = await checkWorker();
+  let health = await checkWorker();
+  if (!health) {
+    const found = await discoverWorker();
+    if (found && found !== API) {
+      API = found;
+      localStorage.setItem('ocr30_api', API);
+      $('#lg-host').textContent = '작업 서버: ' + API;
+      health = await checkWorker();
+    }
+  }
   // 서버가 서비스 모드면 서버 설정을, 아니면 화면 기본값을 쓴다. 서버가 꺼져 있어도 로그인은 된다.
   const url = health?.supabaseUrl || CFG.supabaseUrl;
   const key = health?.anonKey || CFG.anonKey;
@@ -596,9 +620,19 @@ function renderWorker() {
 }
 
 async function retryWorker() {
-  const health = await checkWorker();
+  let health = await checkWorker();
+  if (!health) {                       // 주소가 바뀌었을 수 있다 — 저장소에서 지금 주소를 찾아본다
+    const found = await discoverWorker();
+    if (found && found !== API) {
+      API = found;
+      localStorage.setItem('ocr30_api', API);
+      health = await checkWorker();
+      if (health) toast('작업 서버 주소가 바뀌어 자동으로 맞췄습니다.');
+    }
+  }
   renderWorker();
-  toast(S.worker ? '작업 서버에 연결됐습니다.' : '아직 응답이 없습니다: ' + API);
+  if (health) toast('작업 서버에 연결됐습니다.');
+  else toast('아직 응답이 없습니다: ' + API);
   return health;
 }
 
