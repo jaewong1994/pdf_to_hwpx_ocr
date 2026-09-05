@@ -704,7 +704,11 @@ async function refreshWallet() {
       const rows = await sbRpc('ocr_wallet_me');
       const r = (Array.isArray(rows) ? rows[0] : rows) || {};
       w = { balance: r.balance || 0, reserved: r.reserved || 0, available: r.available || 0,
-            pricePerProblem: r.price_per_problem || 0, isAdmin: !!r.is_admin };
+            pricePerProblem: r.price_per_problem || 0,
+            priceGenerated: r.price_generated || r.price_per_problem || 0,
+            priceFlex: r.price_flex || r.price_per_problem || 0,
+            priceGeneratedFlex: r.price_generated_flex || r.price_generated || r.price_per_problem || 0,
+            isAdmin: !!r.is_admin };   // 09-05: 하나만 읽어 생성 단가가 0으로 보였다
     } else {
       w = await api('/api/me');
     }
