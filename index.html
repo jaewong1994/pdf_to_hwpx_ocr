@@ -423,6 +423,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
         <div class="rev" id="review" hidden></div>
         <div class="row">
           <button class="btn" id="btn-review-all">전체 문항 보기</button>
+          <button class="btn" id="btn-continue" hidden title="문제·해설 PDF와 판독 캐시를 이어받아 다음 쪽 범위만 입력하면 됩니다">같은 교재 다음 묶음 이어서</button>
           <button class="btn" id="btn-new">새 작업 맡기기</button>
         </div>
       </div>
@@ -1023,8 +1024,45 @@ async function finish(state) {
   if (S.service) cells.push(['소모 캐시', num(c.spent)], ['돌려받은 예약', num(c.released)], ['남은 잔액', num(w?.balance)]);
   $('#done-stats').innerHTML = cells.map(([k, v]) => `<div><b class="n">${v}</b><span>${esc(k)}</span></div>`).join('');
   $('#sec-done').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // 문제집은 한 작업 40쪽까지라 전권은 묶음으로 나눈다 — 다음 묶음은 캐시를 이어받는다(해설 재판독·가이드 비용 0).
+  $('#btn-continue').hidden = !(S.kind !== 'exam' && state.problemPages);
   loadReview();
 }
+
+/* ── 같은 교재 다음 묶음 ───────────────────────────────────────────────────
+   서버가 PDF·Mathpix 캐시·번호 가이드·해설 색인을 복사한 새 작업을 만든다. 화면은 그 작업으로 옮겨 가고
+   문제 쪽 범위만(다음 40쪽을 미리 채움) 확인하면 바로 분석할 수 있다. */
+async function continueBatch() {
+  const btn = $('#btn-continue'); btn.disabled = true;
+  try {
+    const st = await api(`/api/session/${S.sid}/continue`, { method: 'POST' });
+    const prevTitle = $('#cf-title').value.trim();
+    clearInterval(S.poll); clearInterval(S.tick); clearInterval(S.syncPoll);
+    S.sid = st.id; S.state = st; S.files = { problem: !!st.files?.problem, solution: !!st.files?.solution }; S.boxes = 0;
+    S.regions = S.regionsBackup = S.result = S.audit = null; S.reviewAll = false;
+    $$('.drop').forEach((z, i) => {
+      const kind = i === 0 ? 'problem' : 'solution';
+      z.classList.toggle('filled', !!S.files[kind]);
+      $('b', z).textContent = S.files[kind] ? (kind === 'problem' ? '문제 PDF 이어받음' : '해설 PDF 이어받음') : (kind === 'problem' ? '문제 PDF' : '해설 PDF');
+      $('.s', z).textContent = S.files[kind] ? '직전 묶음의 파일과 판독 캐시를 그대로 씁니다 · 바꾸려면 클릭' : '정답·풀이가 담긴 파일';
+    });
+    $('#p-pages').value = st.suggestedProblemPages || '';
+    $('#s-pages').value = st.solutionPages || '';
+    $('#cf-title').value = (prevTitle || st.title || '').replace(/\s*\(\d+\)$/, '') + (st.suggestedProblemPages ? ` (${st.suggestedProblemPages}쪽)` : '');
+    ['#sec-confirm', '#sec-progress', '#sec-done'].forEach(s => $(s).hidden = true);
+    $('#preview-wrap').hidden = true; $('#pages').innerHTML = ''; $('#review').innerHTML = ''; $('#review').hidden = true;
+    $('#step1').classList.remove('done'); $('#step2').classList.remove('done');
+    $('#btn-analyze').disabled = !S.files.problem;
+    $('#upload-hint').textContent = st.suggestedProblemPages
+      ? `다음 묶음 ${st.suggestedProblemPages}쪽을 미리 채웠습니다. 범위를 확인하고 분석하세요.`
+      : '직전 묶음이 마지막 쪽까지 처리했습니다. 범위를 직접 입력하세요.';
+    toast(st.solutionIndex?.inherited ? '해설 색인과 판독 캐시를 이어받았습니다.' : '파일과 판독 캐시를 이어받았습니다.');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    $('#p-pages').focus();
+  } catch (e) { toast('이어받기 실패: ' + e.message); }
+  finally { btn.disabled = false; }
+}
+$('#btn-continue').addEventListener('click', continueBatch);
 
 $('#btn-download').addEventListener('click', async () => {
   const btn = $('#btn-download'); btn.disabled = true;
