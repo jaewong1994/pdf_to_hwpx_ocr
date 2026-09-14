@@ -1150,8 +1150,7 @@ function guideBadge(key) {
   if (!rep) return '';
   const issues = rep.issues || [];
   if (issues.length) {
-    const why = issues.map(i => `${i.n}번: ${i.why}`).join('
-');
+    const why = issues.map(i => `${i.n}번: ${i.why}`).join('\n');
     return `<span class="chk" title="${esc(why)}">가이드 확인 ${issues.length}</span>`;
   }
   const filled = (S.regions.pages[key] || []).filter(b => b && b.guide === 'assigned').length;
