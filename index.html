@@ -416,7 +416,9 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
         <span class="ic"><svg class="icon" viewBox="0 0 24 24"><path d="M4 12.5l5.2 5.2L20 7"/></svg></span>
         <div style="flex:1"><h2 style="font-size:17px">한글 파일이 준비됐습니다</h2><div class="tiny" id="done-sub"></div></div>
         <button class="btn primary lg" id="btn-download"><svg class="icon" viewBox="0 0 24 24"><path d="M12 4v12M8 12l4 4 4-4"/><path d="M4 20h16"/></svg>내려받기</button>
+        <button class="btn" id="btn-part" hidden title="이 묶음만 따로 받습니다">이 묶음만</button>
       </div>
+      <div class="tiny" id="dl-note" hidden style="padding:0 2px 4px;color:var(--muted)">지금까지 끝난 묶음을 한 파일로 이어 붙인 전권 합본입니다.</div>
       <div class="stats" id="done-stats"></div>
       <div class="pad" style="border-top:1px solid var(--line-2);display:grid;gap:14px">
         <div class="hintbar" id="audit-bar">검수 결과를 불러오는 중…</div>
@@ -1032,6 +1034,10 @@ async function finish(state) {
   $('#sec-done').scrollIntoView({ behavior: 'smooth', block: 'start' });
   // 문제집은 한 작업 40쪽까지라 전권은 묶음으로 나눈다 — 다음 묶음은 캐시를 이어받는다(해설 재판독·가이드 비용 0).
   $('#btn-continue').hidden = !(S.kind !== 'exam' && state.problemPages);
+  const merged = (state.chainCount || 0) >= 2;
+  $('#dl-note').hidden = !merged;
+  $('#btn-part').hidden = !merged;
+  $('#btn-download').innerHTML = $('#btn-download').innerHTML.replace(/내려받기(?: \(전권 합본\))?/, merged ? '내려받기 (전권 합본)' : '내려받기');
   loadReview();
 }
 
@@ -1070,19 +1076,24 @@ async function continueBatch() {
 }
 $('#btn-continue').addEventListener('click', continueBatch);
 
-$('#btn-download').addEventListener('click', async () => {
-  const btn = $('#btn-download'); btn.disabled = true;
+async function downloadResult(ev) {
+  const btn = ev && ev.currentTarget || $('#btn-download'); btn.disabled = true;
   try {
-    const res = await api(`/api/session/${S.sid}/download`);
+    const part = ev && ev.currentTarget && ev.currentTarget.id === 'btn-part';
+    const res = await api(`/api/session/${S.sid}/download${part ? '?part=1' : ''}`);
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
+    const base = $('#cf-title').value.trim() || 'OCR30_결과';
+    const whole = !part && (S.state?.chainCount || 0) >= 2;
     const a = document.createElement('a');
-    a.href = url; a.download = ($('#cf-title').value.trim() || 'OCR30_결과') + '.hwpx';
+    a.href = url; a.download = base + (whole ? '_전권' : '') + '.hwpx';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
   } catch (e) { toast('내려받기 실패: ' + e.message); }
   finally { btn.disabled = false; }
-});
+}
+$('#btn-download').addEventListener('click', downloadResult);
+$('#btn-part').addEventListener('click', downloadResult);
 
 $('#btn-new').addEventListener('click', () => {
   S.sid = null; S.files = {}; S.boxes = 0;
