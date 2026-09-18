@@ -765,7 +765,7 @@ async function analyze() {
     const st = await api(`/api/session/${S.sid}/analyze`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sections: [], endQuestion: 0, layoutMode: S.kind,
-                             problemPages: $('#p-pages').value.trim() || null,
+                             problemPages: S.kind === 'exam' ? null : ($('#p-pages').value.trim() || null),
                              commonPages: $('#p-pages').value.trim() || null,
                              electives: S.kind === 'exam' ? electivesPayload() : [],
                              autoElectives: S.kind === 'exam' && electivesPayload().length === 0,
