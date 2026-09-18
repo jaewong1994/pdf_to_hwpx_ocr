@@ -74,6 +74,14 @@ main{max-width:1060px;margin:0 auto;padding:28px 20px 96px}
 /* ── 업로드 존 ─────────────────────────────────────────────────────────── */
 .drops{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media (max-width:720px){.drops{grid-template-columns:1fr}}
+.drop-batch{grid-column:1/-1}
+.batch-list{display:grid;gap:8px}
+.batch-item{display:flex;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:13.5px}
+.batch-item .nm{font-weight:700}
+.batch-item .st{margin-left:auto;font-size:12.5px;color:var(--ink-3);white-space:nowrap}
+.batch-item.run{border-color:var(--brand-line);background:var(--brand-soft)}
+.batch-item.done{border-color:#BBE7CE;background:#F0FDF6}
+.batch-item.fail{border-color:#FECACA;background:#FEF2F2}
 .drop{position:relative;border:1.5px dashed var(--line);border-radius:12px;background:#FCFDFF;padding:20px 18px;text-align:center;cursor:pointer;transition:border-color .18s ease,background .18s ease}
 .drop:hover,.drop.over{border-color:var(--brand);background:var(--brand-soft)}
 .drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
@@ -312,6 +320,20 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
             <span class="ic"><svg class="icon" viewBox="0 0 24 24"><path d="M12 16V4M8 8l4-4 4 4"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg></span>
             <b>해설 PDF <span class="opt">선택</span></b><span class="s">정답·풀이가 담긴 파일</span>
           </label>
+          <label class="drop drop-batch" id="drop-batch">
+            <input type="file" accept="application/pdf" multiple>
+            <span class="ic"><svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg></span>
+            <b>여러 회차 한 번에</b><span class="s">문제 PDF와 이름 끝이 _해설인 파일을 같이 놓으면 짝을 맞춰 차례로 한글화합니다</span>
+          </label>
+        </div>
+        <div id="batch-box" hidden>
+          <div class="tiny" style="margin-bottom:8px">짝이 맞은 회차입니다. 모의고사면 선택과목을 비워 두면 자동으로 나눕니다.</div>
+          <div class="batch-list" id="batch-queue"></div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn primary" id="btn-batch-run">이 회차들 한글화</button>
+            <button class="btn" id="btn-batch-clear">목록 지우기</button>
+            <span class="tiny" id="batch-hint"></span>
+          </div>
         </div>
         <div class="kindpick" id="kind-pick">
           <button type="button" class="opt on" data-kind="textbook">
@@ -560,7 +582,8 @@ let API = (localStorage.getItem('ocr30_api') || location.origin).replace(/\/$/, 
 
 const S = { sb: null, session: null, wallet: null, service: false, worker: false, sid: null, files: {}, boxes: 0,
             state: null, regions: null, regionsBackup: null, result: null, audit: null, reviewAll: false,
-            format: { columns: 2, itemsPerColumn: 2 }, speed: 'fast', kind: 'textbook', skipped: {}, pending: 0, poll: null, tick: null, t0: 0, syncPoll: null };
+            format: { columns: 2, itemsPerColumn: 2 }, speed: 'fast', kind: 'textbook', skipped: {}, pending: 0, poll: null, tick: null, t0: 0, syncPoll: null,
+            batch: [] };
 
 let toastT;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 3600); }
@@ -674,6 +697,7 @@ function renderWorker() {
   $('#srv-addr').textContent = API;
   $$('.drop input').forEach(i => { i.disabled = !S.worker; });
   if (!S.worker) $('#btn-analyze').disabled = true;
+  if ($('#btn-batch-run')) $('#btn-batch-run').disabled = !S.worker || !S.batch.length;
 }
 
 async function retryWorker() {
@@ -733,12 +757,23 @@ async function refreshWallet() {
 
 /* ── 업로드 ────────────────────────────────────────────────────────────── */
 $$('.drop').forEach(zone => {
+  if (zone.id === 'drop-batch') return;
   const input = $('input', zone);
   ['dragenter', 'dragover'].forEach(t => zone.addEventListener(t, e => { e.preventDefault(); zone.classList.add('over'); }));
   ['dragleave', 'drop'].forEach(t => zone.addEventListener(t, e => { e.preventDefault(); zone.classList.remove('over'); }));
   zone.addEventListener('drop', e => { const f = e.dataTransfer.files?.[0]; if (f) upload(input.dataset.kind, f, zone); });
   input.addEventListener('change', () => { const f = input.files?.[0]; if (f) upload(input.dataset.kind, f, zone); });
 });
+(function () {
+  const zone = $('#drop-batch');
+  const input = $('input', zone);
+  ['dragenter', 'dragover'].forEach(t => zone.addEventListener(t, e => { e.preventDefault(); zone.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => zone.addEventListener(t, e => { e.preventDefault(); zone.classList.remove('over'); }));
+  zone.addEventListener('drop', e => { takeBatchFiles(e.dataTransfer.files); });
+  input.addEventListener('change', () => { takeBatchFiles(input.files); input.value = ''; });
+})();
+$('#btn-batch-run').addEventListener('click', runBatchQueue);
+$('#btn-batch-clear').addEventListener('click', () => { S.batch = []; renderBatchQueue(); });
 
 async function upload(kind, file, zone) {
   const label = kind === 'problem' ? '문제' : '해설';
@@ -756,6 +791,154 @@ async function upload(kind, file, zone) {
   }
   $('#btn-analyze').disabled = !S.files.problem;
   $('#upload-hint').textContent = S.files.problem ? (S.files.solution ? '해설까지 준비됐습니다.' : '해설 PDF 없이 진행하면 문제만 조판됩니다.') : '문제 PDF를 올리면 분석할 수 있습니다.';
+}
+
+function guessExamKind(name) {
+  return /(모의|파이널|학평|수능|평가원|실모)/.test(String(name || '')) ? 'exam' : 'textbook';
+}
+
+function pairExamPdfs(files) {
+  const list = Array.from(files || []).filter(f => /\.pdf$/i.test(f.name || ''));
+  const buckets = {};
+  for (const file of list) {
+    const stem = String(file.name).replace(/\.pdf$/i, '');
+    const m = stem.match(/^(.*)[_-]해설$/i);
+    if (m) {
+      (buckets[m[1]] ||= { title: m[1], problem: null, solution: null }).solution = file;
+    } else {
+      const slot = buckets[stem] ||= { title: stem, problem: null, solution: null };
+      slot.problem = file;
+      slot.title = stem;
+    }
+  }
+  return Object.keys(buckets).sort((a, b) => a.localeCompare(b, 'ko')).map(key => buckets[key])
+    .filter(slot => slot.problem)
+    .map(slot => ({ title: slot.title, problem: slot.problem, solution: slot.solution,
+                    kind: guessExamKind(slot.title), status: 'queued', sid: null, note: '' }));
+}
+
+function renderBatchQueue() {
+  const box = $('#batch-box'), list = $('#batch-queue');
+  box.hidden = S.batch.length === 0;
+  list.innerHTML = S.batch.map((job, i) => {
+    const st = { queued: '대기', uploading: '올리는 중', analyzing: '분석', running: '한글화', complete: '완료', failed: '실패' }[job.status] || job.status;
+    const sol = job.solution ? '해설 있음' : '문제만';
+    return `<div class="batch-item ${esc(job.status === 'complete' ? 'done' : job.status === 'failed' ? 'fail' : job.status === 'running' || job.status === 'analyzing' || job.status === 'uploading' ? 'run' : '')}">`
+      + `<span class="nm">${esc(job.title)}</span><span class="tiny">${esc(sol)} · ${job.kind === 'exam' ? '모의고사' : '문제집'}</span>`
+      + `<span class="st">${esc(st)}${job.note ? ' · ' + esc(job.note) : ''}</span></div>`;
+  }).join('');
+  $('#batch-hint').textContent = S.batch.length ? `${S.batch.length}세트를 차례로 한글화합니다.` : '';
+  $('#drop-batch').classList.toggle('filled', S.batch.length > 0);
+}
+
+function takeBatchFiles(fileList) {
+  const jobs = pairExamPdfs(fileList);
+  if (!jobs.length) { toast('문제 PDF를 찾지 못했습니다. 이름 끝이 _해설인 파일은 해설로만 짝을 맞춥니다.'); return; }
+  S.batch = jobs;
+  if (jobs.every(j => j.kind === 'exam')) applyKind('exam');
+  renderBatchQueue();
+  toast(`${jobs.length}개 회차를 목록에 넣었습니다.`);
+}
+
+function applyKind(kind) {
+  S.kind = kind === 'exam' ? 'exam' : 'textbook';
+  $$('#kind-pick .opt').forEach(x => x.classList.toggle('on', x.dataset.kind === S.kind));
+  const exam = S.kind === 'exam';
+  $('#exam-fields').hidden = !exam;
+  $('#p-pages-label').textContent = exam ? '공통 과목 쪽 범위' : '문제 쪽 범위';
+  $('#p-pages').placeholder = exam ? '예: 1-8' : '예: 7-140';
+}
+
+function waitMs(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function waitSession(sid, done) {
+  for (;;) {
+    const s = await api('/api/session/' + sid);
+    if (done(s)) return s;
+    await waitMs(1500);
+  }
+}
+
+async function downloadSid(sid, title) {
+  const res = await api(`/api/session/${sid}/download`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = (title || 'OCR30_결과') + '.hwpx';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+async function runBatchQueue() {
+  if (!S.batch.length) { toast('먼저 여러 회차 PDF를 올려 주세요.'); return; }
+  if (!S.service && !$('#cf-key').value.trim()) { toast('API 키를 입력해주세요.'); $('#key-field').hidden = false; return; }
+  const btn = $('#btn-batch-run'); btn.disabled = true;
+  $('#sec-progress').hidden = false;
+  S.t0 = Date.now(); elapsed();
+  clearInterval(S.tick); S.tick = setInterval(elapsed, 1000);
+  try {
+    for (let i = 0; i < S.batch.length; i++) {
+      const job = S.batch[i];
+      job.status = 'uploading'; job.note = `${i + 1}/${S.batch.length}`; renderBatchQueue();
+      setProgress(Math.round(100 * i / S.batch.length), `${job.title} 올리는 중`, 'running');
+      applyKind(job.kind);
+      S.sid = (await api('/api/session/new', { method: 'POST' })).id;
+      job.sid = S.sid;
+      await api(`/api/session/${S.sid}/upload?kind=problem`, { method: 'POST', headers: { 'Content-Type': job.problem.type || 'application/pdf' }, body: job.problem });
+      S.files = { problem: job.problem.name };
+      if (job.solution) {
+        await api(`/api/session/${S.sid}/upload?kind=solution`, { method: 'POST', headers: { 'Content-Type': job.solution.type || 'application/pdf' }, body: job.solution });
+        S.files.solution = job.solution.name;
+      }
+      $('#cf-title').value = job.title;
+      job.status = 'analyzing'; renderBatchQueue();
+      setProgress(Math.round(100 * i / S.batch.length) + 4, `${job.title} 영역 분석`, 'running');
+      S.state = await api(`/api/session/${S.sid}/analyze`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sections: [], endQuestion: 0, layoutMode: job.kind,
+                               problemPages: job.kind === 'exam' ? null : ($('#p-pages').value.trim() || null),
+                               commonPages: job.kind === 'exam' ? ($('#p-pages').value.trim() || null) : null,
+                               electives: job.kind === 'exam' ? electivesPayload() : [],
+                               autoElectives: job.kind === 'exam' && electivesPayload().length === 0,
+                               solutionPages: $('#s-pages').value.trim() || null })
+      });
+      if (job.solution) {
+        await api(`/api/session/${S.sid}/solution_index`, { method: 'POST' });
+        await waitSession(S.sid, s => { const ix = s.solutionIndex || {}; return ix.status === 'ready' || ix.status === 'failed'; });
+      }
+      job.status = 'running'; renderBatchQueue();
+      const cfg = { title: job.title, provider: 'gemini', model: '',
+                    apiKey: S.service ? '' : $('#cf-key').value.trim(), maxWorkers: 4,
+                    columns: S.format.columns, itemsPerColumn: S.format.itemsPerColumn,
+                    textFont: '나눔고딕', textSize: 10, equationFont: 'HYhwpEQ', equationSize: 11,
+                    noteMode: 'endnote', generateMissingSolutions: true, regionMode: 'problem_boxes',
+                    speed: S.speed };
+      await api(`/api/session/${S.sid}/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+      const done = await waitSession(S.sid, s => s.status === 'complete' || s.status === 'failed' || s.status === 'error');
+      if (done.status !== 'complete') {
+        job.status = 'failed'; job.note = done.error || '실패'; renderBatchQueue();
+        continue;
+      }
+      job.status = 'complete';
+      try {
+        const result = await api(`/api/session/${S.sid}/result`);
+        const probs = result.problems || [];
+        const empty = probs.filter(p => (p.ocr_meta || {}).policy === 'empty_slot_v1').length;
+        job.note = `문항 ${probs.length} · 빈 자리 ${empty}`;
+        await downloadSid(S.sid, job.title);
+      } catch (e) { job.note = '완료 · 내려받기 실패'; }
+      renderBatchQueue();
+    }
+    const last = S.batch.filter(j => j.status === 'complete').at(-1);
+    if (last && last.sid) {
+      S.sid = last.sid;
+      const s = await api('/api/session/' + last.sid);
+      await finish(s);
+    } else {
+      setProgress(0, '한글화에 실패한 회차가 있습니다.', 'failed');
+    }
+  } catch (e) { toast('일괄 한글화 실패: ' + e.message); }
+  finally { btn.disabled = false; }
 }
 
 /* ── 분석 ──────────────────────────────────────────────────────────────── */
@@ -904,14 +1087,7 @@ async function loadSolutionIndex(opts) {
 /* ── 원본 종류: 문제집 / 모의고사 ─────────────────────────────────────────
    모의고사는 선택과목마다 23번부터 다시 시작해 번호가 겹친다. 과목별 쪽 범위를 받아 서버가
    구획을 나누고 번호를 밀어 준다(2026-09-05 사용자 "모의고사 선택 넣어줘"). */
-$$('#kind-pick .opt').forEach(btn => btn.addEventListener('click', () => {
-  S.kind = btn.dataset.kind;
-  $$('#kind-pick .opt').forEach(x => x.classList.toggle('on', x === btn));
-  const exam = S.kind === 'exam';
-  $('#exam-fields').hidden = !exam;
-  $('#p-pages-label').textContent = exam ? '공통 과목 쪽 범위' : '문제 쪽 범위';
-  $('#p-pages').placeholder = exam ? '예: 1-8' : '예: 7-140';
-}));
+$$('#kind-pick .opt').forEach(btn => btn.addEventListener('click', () => applyKind(btn.dataset.kind)));
 
 $$('.erow input[type=checkbox]').forEach(box => box.addEventListener('change', () => {
   const field = $(`[data-el-pages="${box.dataset.el}"]`);
@@ -1029,6 +1205,12 @@ async function finish(state) {
   $('#sec-done').hidden = false;
   $('#done-sub').textContent = `${$('#cf-title').value.trim() || '무제'} · ${$('#pg-elapsed').textContent} 걸림`;
   const cells = [['승인 문항', num(c.approved ?? S.boxes)]];
+  try {
+    const result = await api(`/api/session/${S.sid}/result`);
+    S.result = result;
+    const empty = (result.problems || []).filter(p => (p.ocr_meta || {}).policy === 'empty_slot_v1');
+    if (empty.length) cells.push(['빈 자리', num(empty.length)]);
+  } catch (_) {}
   if (S.service) cells.push(['소모 캐시', num(c.spent)], ['돌려받은 예약', num(c.released)], ['남은 잔액', num(w?.balance)]);
   $('#done-stats').innerHTML = cells.map(([k, v]) => `<div><b class="n">${v}</b><span>${esc(k)}</span></div>`).join('');
   $('#sec-done').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1052,8 +1234,9 @@ async function continueBatch() {
     clearInterval(S.poll); clearInterval(S.tick); clearInterval(S.syncPoll);
     S.sid = st.id; S.state = st; S.files = { problem: !!st.files?.problem, solution: !!st.files?.solution }; S.boxes = 0;
     S.regions = S.regionsBackup = S.result = S.audit = null; S.reviewAll = false;
-    $$('.drop').forEach((z, i) => {
-      const kind = i === 0 ? 'problem' : 'solution';
+    $$('.drop').forEach(z => {
+      if (z.id === 'drop-batch') return;
+      const kind = z.id === 'drop-solution' ? 'solution' : 'problem';
       z.classList.toggle('filled', !!S.files[kind]);
       $('b', z).textContent = S.files[kind] ? (kind === 'problem' ? '문제 PDF 이어받음' : '해설 PDF 이어받음') : (kind === 'problem' ? '문제 PDF' : '해설 PDF');
       $('.s', z).textContent = S.files[kind] ? '직전 묶음의 파일과 판독 캐시를 그대로 씁니다 · 바꾸려면 클릭' : '정답·풀이가 담긴 파일';
@@ -1554,7 +1737,7 @@ async function openEditor(key, index) {
 const LABEL = { fragment_start: '앞 문항 꼬리가 섞임', no_question_end: '발문이 잘림',
   text_only_figure: '그림이 아니라 글줄', clipped_figure: '그림이 잘림',
   number_noise: '엉뚱한 번호', unbound_solution: '해설 없음',
-  number_gap: '문항을 놓침', empty_body: '본문이 빔' };
+  number_gap: '문항을 놓침', empty_body: '본문이 빔', empty_slot: '빈 자리(미주만)' };
 
 async function loadReview() {
   let report = null;
